@@ -1,0 +1,38 @@
+# Keil build artifacts
+*.axf
+*.hex
+*.bin
+*.map
+*.lst
+*.o
+*.d
+*.crf
+*.elf
+*.lib
+*.lnp
+*.dep
+
+# Keil generated directories
+Objects/
+Listings/
+DebugConfig/
+RTE/
+MDK-ARM/F4Camera/
+
+# Keil per-user UI state
+*.uvgui
+*.uvgui.*
+*.uvguix
+*.uvguix.*
+
+# Local backups and temporary files
+Backup/
+*.bak
+*.tmp
+*.orig
+*~
+.DS_Store
+Thumbs.db
+
+# Local agent metadata
+.agents/
