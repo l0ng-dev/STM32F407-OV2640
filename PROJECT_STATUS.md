@@ -1,82 +1,76 @@
 # F4Camera 工程状态
 
-> 审计日期：2026-07-14  
-> 审计依据：当前 `F4Camera.ioc`、`Core`、`BSP`、`MDK-ARM/F4Camera.uvprojx`、Keil 构建日志和 MAP 文件。  
-> 状态含义：✅ 已完成｜⚠️ 部分完成｜⏳ 未完成｜❌ 存在问题
+> 最后更新：2026-07-14  
+> 工程平台：STM32F407ZGT6 + OV2640 Camera + 正点原子 2.8 寸 LCD  
+> 状态标记：✅ 已完成｜⚠️ 部分完成｜⏳ 未完成｜❌ 存在问题
 
-本文档用于在脱离当前聊天上下文后交接工程。未在源码、配置或构建产物中找到证据的功能，不视为已完成。
+本文档用于记录当前仓库的真实工程状态，供后续开发和新的 AI 会话接手使用。配置存在、编译通过与硬件验证是三个不同层级，未进行实机验证的功能不得标记为硬件完成。
 
-## 一、项目基本信息
+## 1. 项目当前阶段
 
-| 项目 | 状态 | 当前信息 |
-|---|---|---|
-| MCU | ✅ 已完成 | STM32F407ZGT6；CubeMX/Keil 器件名 `STM32F407ZGTx`；LQFP144 |
-| 开发板 | ⚠️ 部分完成 | LCD BSP 注释指向正点原子 M144Z-M4 STM32F407 平台；仓库内没有原理图，具体板卡版本和全部连线未独立核验 |
-| 摄像头 | ⏳ 未完成 | 项目目标为 OV2640；当前没有 OV2640 驱动文件 |
-| LCD | ⚠️ 部分完成 | 正点原子 2.8 寸、8080 并口 LCD；FSMC 驱动与测试代码已编译，硬件显示结果未知 |
-| 软件框架 | ✅ 已完成 | STM32CubeMX 生成结构 + STM32 HAL；固件包 `STM32Cube FW_F4 V1.28.3` |
-| CubeMX | ✅ 已完成 | `F4Camera.ioc`，CubeMX 6.18.0 |
-| Keil | ✅ 已完成 | μVision 5.43.1 / MDK-ARM Community 5.43 |
-| 编译器 | ✅ 已完成 | Arm Compiler 6，ArmClang 6.24 |
-| 调试器配置 | ⚠️ 部分完成 | Keil 工程使用 ST-Link 调试配置；仓库内没有本轮下载或运行记录 |
+当前阶段：**LCD/FSMC 迁移及第一次硬件验证已经完成，摄像头数据链路尚未开始迁移。**
 
-### 工程目标
+### 已完成
 
-将 OV2640 摄像头实验迁移为可维护的 STM32CubeMX + Keil + HAL 工程，最终实现：
+- ✅ 已完成：创建 STM32CubeMX HAL 工程，目标器件为 STM32F407ZGT6。
+- ✅ 已完成：FSMC/LCD 底层配置。
+- ✅ 已完成：正点原子 LCD BSP 迁移。
+- ✅ 已完成：LCD BSP 加入 Keil 工程并配置头文件搜索路径。
+- ✅ 已完成：Keil Arm Compiler 6 编译和链接验证。
+- ✅ 已完成：LCD 实机显示验证。
 
-- OV2640 初始化与图像输出。
-- DCMI + DMA 图像采集。
-- JPEG 数据接收、帧边界和长度处理。
-- USART1 调试输出。
-- USART2 图像数据发送至 PC。
-- LCD 用于显示和硬件调试。
+### 未完成
 
-当前阶段：**LCD/FSMC 软件接入和编译已完成，等待硬件确认；摄像头应用层尚未迁移。**
+- ⏳ 未完成：OV2640 驱动迁移。
+- ⏳ 未完成：SCCB 通信驱动迁移。
+- ⏳ 未完成：DCMI 实际采集流程。
+- ⏳ 未完成：DMA 图像缓存设计与采集启动。
+- ⏳ 未完成：JPEG 数据处理。
+- ⏳ 未完成：USART 图像输出。
 
-## 二、当前完成状态
+## 2. 已完成模块记录
 
-### 1. CubeMX 工程状态
+### LCD/FSMC 模块
 
-| 模块 | 状态 | 当前配置与验证范围 |
-|---|---|---|
-| GPIO | ⚠️ 部分完成 | 已生成 LED、按键、LCD 背光、FSMC、DCMI、SCCB、OV_PWDN、OV_RESET、OV_FLASH、USART 引脚配置；只确认配置和编译存在，未确认全部硬件连线 |
-| RCC | ⚠️ 部分完成 | HSE=8 MHz，PLL M/N/P=8/336/2，SYSCLK/HCLK=168 MHz，APB1=42 MHz，APB2=84 MHz；编译通过，实机时钟未记录 |
-| FSMC | ⚠️ 部分完成 | Bank1 NOR/SRAM4、16 bit、Extended Mode；NE4=PG12，A6=PF12；HAL 初始化和 LCD 代码已编译，LCD 总线实测未知 |
-| DCMI | ⚠️ 部分完成 | 硬件同步、8 bit、全帧、PCLK 上升沿、VSYNC/HSYNC 低有效；`JPEGMode=DISABLE`；只存在初始化代码，未开始采集 |
-| DMA | ⚠️ 部分完成 | DCMI 使用 DMA2 Stream1 / Channel 1，外设到内存，Word 对齐，循环模式，Very High 优先级，FIFO Half Full；无采集缓冲和启动调用 |
-| USART1 | ⚠️ 部分完成 | PA9/PA10，115200，8N1，TX/RX；仅初始化，无调试发送代码 |
-| USART2 | ⚠️ 部分完成 | PA2/PA3，921600，8N1，HAL 模式为 TX；仅初始化，无图像发送协议或发送代码 |
-| TIM6 | ⚠️ 部分完成 | APB1 定时器时钟 84 MHz，Prescaler=8399，Period=9999，更新频率约 1 Hz；中断已配置为优先级 2，但未调用启动函数 |
-| NVIC | ⚠️ 部分完成 | DCMI 和 DMA2 Stream1 中断均启用、抢占优先级均为 0；中断入口调用 HAL，应用回调未实现 |
+#### 硬件与总线配置
 
-#### 关键引脚
+| 项目 | 当前配置 |
+|---|---|
+| MCU | STM32F407ZGT6，LQFP144 |
+| LCD | 正点原子 2.8 寸并口 LCD |
+| FSMC Bank | FSMC Bank1 NOR/SRAM4，即 NE4 地址空间 |
+| 存储器模式 | NOR/SRAM 控制器，SRAM 类型，异步访问 |
+| 数据宽度 | 16 bit |
+| 片选 | PG12 = FSMC_NE4 |
+| 寄存器选择 | PF12 = FSMC_A6 |
+| 扩展模式 | Enabled，读写时序分离 |
 
-- LCD：PG12=`FSMC_NE4`，PF12=`FSMC_A6`，PD/PE 为 16 位数据总线，PD4=`FSMC_NOE`，PD5=`FSMC_NWE`。
-- LCD 背光：PB15 普通 GPIO 输出；实际连接和有效电平未确认。
-- DCMI：PC6/7/8/9=`D0..D3`，PC11=`D4`，PB6=`D5`，PE5/6=`D6/D7`，PA4=`HSYNC`，PA6=`PIXCLK`，PB7=`VSYNC`。
-- SCCB 预留：PD6=`SCCB_SCL`，PD7=`SCCB_SDA`。
-- OV2640 控制预留：PG9=`OV_PWDN`，PG15=`OV_RESET`，PA8=`OV_FLASH`。
-- USART1：PA9/PA10；USART2：PA2/PA3。
+FSMC 读时序：AddressSetupTime = 15，DataSetupTime = 60。  
+FSMC 写时序：AddressSetupTime = 9，DataSetupTime = 9。
 
-### 2. LCD/FSMC 状态
+#### 地址映射
 
-| 检查项 | 状态 | 结果 |
-|---|---|---|
-| `BSP/LCD` 目录 | ✅ 已完成 | 实际存在 |
-| `lcd.c` | ✅ 已完成 | 存在并加入 Keil `BSP/LCD` 分组 |
-| `lcd_ex.c` | ✅ 已完成 | 存在、独立编译并加入 Keil，不由 `lcd.c` 直接包含 |
-| `lcd.h` | ✅ 已完成 | 存在；定义 NE4/A6 地址映射和 PB15 背光 |
-| `lcd_ex.h` | ✅ 已完成 | 存在；声明各 LCD 控制器初始化函数 |
-| `lcdfont.h` | ✅ 已完成 | 存在并由 `lcd.c` 引用 |
-| Keil Include Path | ✅ 已完成 | 已包含 `..\BSP\LCD` |
-| 重复 FSMC 初始化 | ✅ 已完成 | LCD BSP 中没有 `HAL_SRAM_Init`、`HAL_SRAM_MspInit` 或旧 `g_sram_handle`；FSMC 由 `MX_FSMC_Init()` 管理 |
-| LCD 调用 | ✅ 已完成 | `main.c` 的 `USER CODE BEGIN 2` 中调用 `lcd_init()` |
-| LCD 测试代码 | ✅ 已完成 | 白色清屏；显示 `LCD TEST`、`FSMC OK`、十六进制 `lcddev.id`；绘制红/绿/蓝色块 |
-| 编译与链接 | ✅ 已完成 | LCD 源文件编译通过；MAP 确认 `main()` 引用并链接 `lcd_init()` |
-| LCD 实际显示 | ⏳ 未完成 | 工程内没有上板显示结果 |
-| LCD ID 结果 | ⏳ 未完成 | 代码会显示 `LCD ID: 0xXXXX`，但工程内没有实际读取值记录 |
+LCD 使用 NE4/A6 映射，16 位总线下 A6 对应字节地址偏移 `0x80`：
 
-当前完整初始化顺序：
+```text
+LCD_REG = 0x6C00007E
+LCD_RAM = 0x6C000080
+```
+
+`LCD_REG` 和 `LCD_RAM` 由 `BSP/LCD/lcd.h` 中的 `LCD_TypeDef` 结构体映射。结构体基地址为 `0x6C00007E`，第二个 16 位成员对应 `0x6C000080`。
+
+#### 软件职责
+
+- ✅ 已完成：CubeMX 生成的 `MX_FSMC_Init()` 负责 FSMC 外设、GPIO 和访问时序初始化。
+- ✅ 已完成：LCD BSP 负责 LCD 寄存器访问、控制器识别、显示方向、绘图和字符显示。
+- ✅ 已完成：旧工程 LCD BSP 内重复的 `g_sram_handle`、`HAL_SRAM_MspInit()` 和 FSMC 初始化代码已经移除。
+- ✅ 已完成：`lcd.c`、`lcd_ex.c`、`lcd.h`、`lcd_ex.h`、`lcdfont.h` 已加入当前工程。
+
+注意：CubeMX 生成的 `Core/Src/fsmc.c` 仍通过 `HAL_SRAM_Init(&hsram4, ...)` 完成 FSMC 初始化，这是当前正确且唯一的初始化入口；删除的是旧 LCD BSP 内的重复初始化代码，并非删除 HAL 的正常调用。
+
+#### 初始化顺序
+
+当前 `main.c` 的关键调用顺序为：
 
 ```text
 HAL_Init()
@@ -92,67 +86,51 @@ lcd_init()
 LCD 测试内容
 ```
 
-LCD 依赖关系满足：`HAL_Init()`、系统时钟、GPIO 和 `MX_FSMC_Init()` 均先于 `lcd_init()`。
+`MX_FSMC_Init()` 在 `lcd_init()` 之前执行，满足 LCD 访问前必须先建立 FSMC 总线的要求。
 
-FSMC/LCD 地址配置：
+#### 测试内容与结果
 
-- Bank：FSMC Bank1 NOR/SRAM4。
-- 数据宽度：16 bit。
-- `LCD_FSMC_NEX=4`，`LCD_FSMC_AX=6`。
-- `LCD_BASE=0x6C00007E`。
-- `LCD_REG=0x6C00007E`，`LCD_RAM=0x6C000080`。
-- 读时序：AddressSetup=15，DataSetup=60。
-- 写时序：AddressSetup=9，DataSetup=9。
+当前 `main.c` 的 `USER CODE BEGIN 2` 区域包含：
 
-### 3. 摄像头、DCMI、JPEG 和 USART 状态
+- 白色清屏。
+- 显示 `LCD TEST`。
+- 显示 `FSMC OK`。
+- 显示 `lcddev.id`。
+- 绘制红、绿、蓝三个色块。
 
-#### OV2640 / SCCB
+实机验证结果：
 
-| 检查项 | 状态 | 结果 |
-|---|---|---|
-| OV2640 驱动文件 | ⏳ 未完成 | `BSP` 中只有 `LCD`；没有 OV2640 目录或源文件 |
-| 加入 Keil | ⏳ 未完成 | Keil 工程没有 OV2640/SCCB 分组或源文件 |
-| SCCB GPIO | ⚠️ 部分完成 | PD6/PD7 已配置并生成宏；没有 SCCB 起始、停止、读写或 ACK 代码 |
-| PWDN/RESET | ⚠️ 部分完成 | PG9/PG15 已配置；没有 OV2640 上电复位时序和初始化流程 |
-| 摄像头 XCLK | ❌ 存在问题 | 工程内未找到 XCLK 输出配置或代码；PA8 当前为 `OV_FLASH` 普通 GPIO。若模块无板载时钟，此项会阻塞摄像头工作 |
-| OV2640 初始化 | ⏳ 未完成 | 没有寄存器表、ID 检测、分辨率或格式配置 |
+- ✅ 已完成：LCD 正常初始化。
+- ✅ 已完成：LCD ID 读取成功；当前文档未记录具体十六进制 ID 值。
+- ✅ 已完成：字符显示正常。
+- ✅ 已完成：红、绿、蓝色块显示正常。
+- ✅ 已完成：FSMC NE4/A6 通信正常。
 
-#### DCMI / DMA
+### Keil 工程接入
 
-| 检查项 | 状态 | 结果 |
-|---|---|---|
-| CubeMX DCMI 配置 | ⚠️ 部分完成 | DCMI 引脚、同步极性、8 位模式和中断已生成 |
-| HAL 初始化 | ✅ 已完成 | `MX_DCMI_Init()`、MSP、DMA 链接和 IRQ Handler 均存在并编译 |
-| DMA 配置 | ⚠️ 部分完成 | DMA2 Stream1 / Channel 1 已配置；未验证是否满足最终 JPEG 变长数据流程 |
-| DMA 缓冲区 | ⏳ 未完成 | 没有静态图像/JPEG 缓冲区及容量设计 |
-| 启动采集 | ⏳ 未完成 | 没有 `HAL_DCMI_Start_DMA()` 调用 |
-| 帧/错误回调 | ⏳ 未完成 | 没有应用层 Frame/Vsync/Line/Error 回调 |
-| 实际图像采集 | ⏳ 未完成 | 没有采集结果、帧计数或图像数据记录 |
+- ✅ 已完成：`lcd.c` 和 `lcd_ex.c` 位于 Keil 的 `BSP/LCD` 分组并参与编译。
+- ✅ 已完成：Include Path 包含 `..\BSP\LCD`。
+- ✅ 已完成：目标器件为 `STM32F407ZGTx`。
+- ✅ 已完成：使用 ArmClang V6.24（ARM Compiler 6）。
+- ✅ 已完成：当前构建结果为 0 Error、0 Warning。
 
-#### JPEG
+当前构建尺寸：
 
-| 检查项 | 状态 | 结果 |
-|---|---|---|
-| OV2640 JPEG 输出配置 | ⏳ 未完成 | 无 OV2640 驱动和 JPEG 寄存器配置 |
-| DCMI JPEG 模式 | ❌ 存在问题 | 当前为 `DCMI_JPEG_DISABLE`，与最终 JPEG 目标不一致 |
-| JPEG 帧边界/长度 | ⏳ 未完成 | 没有 SOI/EOI、DMA 写入位置或帧长度处理 |
-| JPEG 数据流程 | ⏳ 未完成 | 没有摄像头→DCMI/DMA→缓冲区→USART/LCD 数据链路 |
+| 类型 | 大小 |
+|---|---:|
+| Code | 23166 bytes |
+| RO-data | 18730 bytes |
+| RW-data | 16 bytes |
+| ZI-data | 2112 bytes |
+| Total ROM | 41912 bytes（40.93 KiB） |
+| Total RW | 2128 bytes（2.08 KiB） |
 
-#### USART
+## 3. 当前工程结构
 
-| 检查项 | 状态 | 结果 |
-|---|---|---|
-| USART1 调试口 | ⚠️ 部分完成 | 115200 TX/RX 初始化存在；无 `printf` 重定向和调试发送代码 |
-| USART2 图像传输 | ⚠️ 部分完成 | 921600、TX 模式初始化存在；无发送调用、帧协议、流控、DMA 或 PC 端适配 |
-| PC 端 XCAM | ⏳ 未完成 | 工程内没有 XCAM 协议或 PC 端验证记录 |
-
-## 三、当前工程结构
-
-仅列出当前实际存在的主要目录和文件：
+当前实际存在的主要工程目录和文件：
 
 ```text
 F4Camera/
-├── .agents/
 ├── BSP/
 │   └── LCD/
 │       ├── lcd.c
@@ -162,28 +140,7 @@ F4Camera/
 │       └── lcdfont.h
 ├── Core/
 │   ├── Inc/
-│   │   ├── dcmi.h
-│   │   ├── dma.h
-│   │   ├── fsmc.h
-│   │   ├── gpio.h
-│   │   ├── main.h
-│   │   ├── stm32f4xx_hal_conf.h
-│   │   ├── stm32f4xx_it.h
-│   │   ├── tim.h
-│   │   └── usart.h
 │   └── Src/
-│       ├── dcmi.c
-│       ├── dma.c
-│       ├── fsmc.c
-│       ├── gpio.c
-│       ├── main.c
-│       ├── stm32f4xx_hal_msp.c
-│       ├── stm32f4xx_it.c
-│       ├── system_stm32f4xx.c
-│       ├── tim.c
-│       └── usart.c
-├── Docs/
-│   └── LCD_FSMC迁移阶段检查报告.md
 ├── Drivers/
 │   ├── CMSIS/
 │   └── STM32F4xx_HAL_Driver/
@@ -191,118 +148,144 @@ F4Camera/
 │   ├── F4Camera.uvprojx
 │   ├── F4Camera.uvoptx
 │   ├── startup_stm32f407xx.s
-│   └── F4Camera/
-│       ├── F4Camera.axf
-│       ├── F4Camera.hex
-│       ├── F4Camera.map
-│       └── F4Camera.build_log.htm
-├── .mxproject
+│   └── F4Camera/                  # 本地 Keil 构建输出，Git 已忽略
 ├── F4Camera.ioc
+├── README.md
 └── PROJECT_STATUS.md
 ```
 
-当前不存在 `BSP/OV2640`、`BSP/JPEG` 或独立 `Application` 目录。
+目录职责：
 
-## 四、编译状态
+- `Core/`：CubeMX 生成的初始化代码、HAL MSP、异常与中断入口，以及当前主程序。
+- `BSP/LCD/`：正点原子 LCD 板级驱动、控制器扩展初始化和字库。
+- `Drivers/`：STM32F4 HAL 驱动与 CMSIS 设备支持文件。
+- `MDK-ARM/`：Keil 工程、启动文件和本地构建输出。
+- `F4Camera.ioc`：CubeMX 外设、引脚和时钟配置源文件。
 
-| 项目 | 状态 | 结果 |
+当前不存在独立的 `Application/`、`BSP/OV2640/` 或 `BSP/JPEG/` 目录，不应在摄像头迁移前提前写入工程结构。
+
+## 4. CubeMX 配置状态
+
+| 模块 | 状态 | 当前配置与验证范围 |
 |---|---|---|
-| Keil 构建 | ✅ 已完成 | 当前目标 `F4Camera` 构建成功 |
-| Error | ✅ 已完成 | 0 |
-| Warning | ✅ 已完成 | 0 |
-| Code | ✅ 已完成 | 23166 bytes |
-| RO-data | ✅ 已完成 | 18730 bytes |
-| RW-data | ✅ 已完成 | 16 bytes |
-| ZI-data | ✅ 已完成 | 2112 bytes |
-| Total ROM | ✅ 已完成 | 41912 bytes（40.93 KiB） |
-| Total RW | ✅ 已完成 | 2128 bytes（2.08 KiB） |
+| RCC | ✅ 已完成 | HSE = 8 MHz，SYSCLK/HCLK = 168 MHz，APB1 = 42 MHz，APB2 = 84 MHz；已支持当前程序和 LCD 实机运行。 |
+| GPIO | ✅ 已完成 | 已生成 FSMC、LCD 背光、DCMI、SCCB 预留、OV2640 控制和 USART 引脚配置。摄像头相关引脚尚未进行通信验证。 |
+| FSMC | ✅ 已完成 | Bank1 NOR/SRAM4、16 bit、NE4/A6、Extended Mode；已完成 LCD 实机验证。 |
+| USART1 | ⚠️ 部分完成 | PA9/PA10，115200，TX/RX；只有初始化代码，尚无调试输出流程。 |
+| USART2 | ⚠️ 部分完成 | PA2/PA3，921600，当前 HAL 模式为 TX；尚无图像协议和发送代码。 |
+| DCMI | ⚠️ 部分完成 | 硬件同步、8 bit、全帧、PCLK 上升沿，当前 `JPEGMode = DISABLE`；仅有 CubeMX 初始化代码。 |
+| DMA | ⚠️ 部分完成 | DCMI 使用 DMA2 Stream1 / Channel 1、循环模式、Very High 优先级；仅有 CubeMX 配置和 HAL 链接。 |
+| TIM6 | ⚠️ 部分完成 | 已生成约 1 Hz 的基础定时器配置，当前应用未启动使用。 |
 
-尺寸来自当前 `MDK-ARM/F4Camera/F4Camera.map`；当前固件已经链接 LCD 初始化、字体和测试代码。没有未解决的编译错误或警告。
+DCMI/DMA 目前只是 CubeMX 配置和生成代码存在。工程中没有 `HAL_DCMI_Start_DMA()`、图像缓冲区、帧完成处理或错误回调，因此尚未形成 OV2640 → DCMI → DMA → 内存的数据链路。
 
-## 五、硬件验证状态
+## 5. 硬件状态
 
-工程内没有足够记录可确认任何本轮硬件功能已经通过。编译通过不等于硬件成功。
+### 硬件组成
 
-| 硬件项目 | 状态 | 当前证据 |
-|---|---|---|
-| ST-Link 下载和运行 | ⏳ 未完成 | 无本轮下载日志或用户确认记录 |
-| LCD 背光 | ⏳ 未完成 | 代码会置 PB15，但无实测结果 |
-| LCD 清屏/文字/RGB 色块 | ⏳ 未完成 | 测试代码存在，无实际显示结果 |
-| LCD 控制器 ID | ⏳ 未完成 | 读取并显示代码存在，实际 ID 未记录 |
-| FSMC NE4/A6 总线 | ⏳ 未完成 | 配置和编译一致，未通过实物显示确认 |
-| OV2640 SCCB 通信 | ⏳ 未完成 | 无驱动和实测 |
-| OV2640 图像采集 | ⏳ 未完成 | 无采集启动和实测 |
-| JPEG 输出 | ⏳ 未完成 | 无实现和实测 |
-| USART1 调试输出 | ⏳ 未完成 | 无发送代码和实测 |
-| USART2 图像发送 | ⏳ 未完成 | 无发送代码和实测 |
-| PC 端 XCAM 显示 | ⏳ 未完成 | 无协议实现和实测 |
+- 开发板：STM32F407ZGT6。
+- 显示模块：正点原子 2.8 寸 LCD。
+- 摄像头：OV2640 摄像头模块。
+- 调试器：ST-Link。
+- 通信工具：USB 串口工具。
 
-## 六、当前问题与风险
+### 已验证
 
-1. ❌ 存在问题：OV2640 驱动、SCCB 协议、寄存器表和初始化流程完全缺失。
-2. ❌ 存在问题：工程内没有摄像头 XCLK 输出配置；PA8 当前配置为 `OV_FLASH`。必须根据原理图确认模块是否自带时钟，否则先补充 XCLK。
-3. ❌ 存在问题：最终目标包含 JPEG，但当前 DCMI 配置为 `DCMI_JPEG_DISABLE`，且没有 JPEG 帧边界和长度处理。
-4. ⚠️ 部分完成：DCMI DMA 使用循环模式，尚未定义变长 JPEG 帧的缓冲容量、回卷、溢出和双缓冲策略。
-5. ⚠️ 部分完成：DCMI/DMA 缓冲必须放在 DMA 可访问的 SRAM1/SRAM2，不能放入 Cortex-M4 CCM RAM；当前尚无缓冲区设计。
-6. ⚠️ 部分完成：DCMI 与 DMA2 Stream1 中断均使用最高抢占优先级 0；进入连续采集后需重新评估与 USART、SysTick 和错误处理的优先级关系。
-7. ⚠️ 部分完成：DCMI 的 PCLK、HSYNC、VSYNC 极性和 GPIO 上拉配置尚未与实际 OV2640 输出波形验证。
-8. ⚠️ 部分完成：PLLQ=4 导致 CubeMX 的“48 MHz 域”显示为 84 MHz；当前未使用 USB/SDIO/RNG，但后续若启用这些外设必须修正时钟树。
-9. ⚠️ 部分完成：FSMC 读写时序、PB15 背光极性及 LCD 控制器兼容性只通过静态检查和编译，仍需上板验证。
-10. ⚠️ 部分完成：USART2 HAL 模式为 TX，但 PA3 仍保留为 USART2_RX；不会阻止当前编译，但应在最终 CubeMX 配置中确认是否需要占用该引脚。
-11. ⚠️ 部分完成：`F4Camera.ioc` 同时记录 `CompilerLinker=GCC` 和 `TargetToolchain=MDK-ARM V5.32`，实际 Keil 使用 ArmClang 6.24；CubeMX 重新生成前应确认工具链设置不会发生漂移。
-12. ⚠️ 部分完成：仓库没有板级原理图，开发板版本、摄像头 XCLK、LCD 背光和全部接口连线无法仅靠源码最终确认。
+- ✅ 已完成：MCU 程序能够正常运行。
+- ✅ 已完成：FSMC NE4/A6 与 LCD 通信正常。
+- ✅ 已完成：LCD 初始化、ID 读取、字符显示和 RGB 色块显示正常。
 
-## 七、下一步开发计划
+### 未验证
 
-### Phase 1：LCD/FSMC 硬件验证
+- ⏳ 未完成：OV2640 SCCB 通信。
+- ⏳ 未完成：OV2640 ID 读取。
+- ⏳ 未完成：DCMI 图像采集。
+- ⏳ 未完成：DMA 图像缓存。
+- ⏳ 未完成：JPEG 输出。
+- ⏳ 未完成：USART 图像传输和 PC 端显示。
 
-- ⏳ 未完成：使用 ST-Link 下载当前 HEX。
-- ⏳ 未完成：确认背光、白色清屏、`LCD TEST`、`FSMC OK` 和 RGB 色块。
-- ⏳ 未完成：记录实际 `lcddev.id`。
-- ⏳ 未完成：若显示异常，通过 CubeMX 调整 FSMC 时序，不直接修改 `fsmc.c` 非 USER CODE 区域。
+## 6. 当前 Git 里程碑
 
-### Phase 2：SCCB 与 OV2640 初始化
+### Milestone
 
-- ⏳ 未完成：根据原理图确认 XCLK、PWDN、RESET 和 SCCB 连线。
-- ⏳ 未完成：建立 `BSP/OV2640`，迁移 SCCB 和 OV2640 驱动。
-- ⏳ 未完成：读取 OV2640 PID/VER，验证 SCCB 通信。
-- ⏳ 未完成：配置基础分辨率和原始/YUV 输出，先不同时引入 JPEG 与 USART 传输。
+**LCD/FSMC Migration Completed**
 
-### Phase 3：DCMI + DMA 采集
+完成内容：
 
-- ⏳ 未完成：设计 DMA 可访问的静态缓冲区和容量。
-- ⏳ 未完成：实现 `HAL_DCMI_Start_DMA()`、帧完成和错误处理。
-- ⏳ 未完成：先验证单帧或固定长度采集，再评估循环/双缓冲模式。
+- CubeMX HAL 工程与正点原子 LCD 驱动融合。
+- FSMC Bank1 NOR/SRAM4、NE4/A6 和 16 位数据总线配置完成。
+- LCD BSP 加入 Keil 工程并通过 Arm Compiler 6 构建。
+- 完成第一次 LCD/FSMC 硬件验证。
 
-### Phase 4：JPEG 数据流程
+当前 Git 状态：
 
-- ⏳ 未完成：配置 OV2640 JPEG 输出和 DCMI JPEG 模式。
-- ⏳ 未完成：实现帧开始/结束、SOI/EOI、实际长度、溢出和丢帧处理。
-- ⏳ 未完成：验证连续多帧稳定性。
+| 项目 | 当前值 |
+|---|---|
+| 分支 | `main` |
+| 基线提交 | `e7f035120e11b6be54afb4db1c48bf1cc0c8ad16` |
+| 版本标签 | `v1.0.0` |
+| Release | `STM32F407 OV2640 Camera Project v1.0.0` |
+| 里程碑状态 | ✅ 已完成 |
 
-### Phase 5：USART 与 PC 端传输
+本次文档更新只允许修改 `PROJECT_STATUS.md`。源码、CubeMX 配置、Keil 配置和工程结构均保持不变。
 
-- ⏳ 未完成：使用 USART1 输出初始化、ID、帧长和错误状态。
-- ⏳ 未完成：为 USART2 设计图像帧协议和发送机制。
-- ⏳ 未完成：评估 921600 baud 吞吐量，必要时使用 UART DMA 和分包。
-- ⏳ 未完成：对接并验证 PC 端 XCAM 显示。
+## 7. 下一步计划
 
-### Phase 6：系统联调
+### Step 1：迁移 SCCB 驱动
 
-- ⏳ 未完成：打通 OV2640 → DCMI/DMA → JPEG 缓冲 → USART/PC 数据链路。
-- ⏳ 未完成：根据带宽决定 LCD 显示路径和刷新策略。
-- ⏳ 未完成：增加超时、错误状态、缓冲溢出和恢复机制。
+目标：
 
-## 八、后续 AI 修改约束
+- 在 BSP 层实现 SCCB 起始、停止、读写和 ACK 流程。
+- 读取 OV2640 PID/VER，确认 SCCB 通信和硬件连接正常。
 
-- 必须以 `F4Camera.ioc` 为外设配置源，优先通过 CubeMX 修改并重新生成。
-- 不得直接修改 CubeMX 生成文件的非 `USER CODE` 区域。
-- 自定义驱动放入 `BSP`，应用逻辑不要继续堆入 `main.c`。
-- LCD/FSMC 初始化由 `MX_FSMC_Init()` 负责，LCD BSP 不重复初始化 FSMC。
+### Step 2：迁移 OV2640 驱动
+
+目标：
+
+- 完成上电、PWDN、RESET 和寄存器初始化流程。
+- 完成摄像头基础格式与分辨率配置。
+
+### Step 3：验证 DCMI DMA 采集
+
+目标：
+
+- 设计 DMA 可访问的静态图像缓冲区。
+- 启动 DCMI DMA，并验证帧完成、错误处理和实际采集数据。
+
+### Step 4：实现 JPEG 数据处理
+
+目标：
+
+- 确认 OV2640 JPEG 输出和 DCMI JPEG 模式。
+- 实现 JPEG 帧边界、有效长度和缓存溢出处理。
+
+### Step 5：实现 LCD 显示和 USART 输出
+
+目标：
+
+- 建立采集图像到 LCD 的显示路径。
+- 设计 USART 图像传输协议并完成 PC 端验证。
+- 根据吞吐量评估 USART2 DMA 发送。
+
+## 8. 保留问题与设计记录
+
+- ❌ 存在问题：当前 DCMI 配置为 `DCMI_JPEG_DISABLE`，后续 JPEG 模式选择仍需结合 OV2640 输出格式确认。
+- ⚠️ 部分完成：JPEG 缓存大小、帧最大长度、溢出处理和缓冲策略需要后续评估。
+- ⚠️ 部分完成：USART2 当前为 921600 baud、TX 模式，后续需要评估 DMA 发送和分包机制。
+- ✅ 已完成：OV2640 模块硬件时钟来源已经确认，当前模块自带晶振，不需要由 STM32 输出 XCLK。
+- ⚠️ 部分完成：DCMI DMA 当前使用循环模式和 Very High 优先级，实际采集后需要重新评估缓存策略和中断优先级。
+- ⚠️ 部分完成：DMA 图像缓冲区必须位于 DMA 可访问的 SRAM1/SRAM2，不能放入 Cortex-M4 CCM RAM。
+- ⏳ 未完成：DCMI 的 PCLK、HSYNC、VSYNC 极性仍需结合 OV2640 实际输出波形验证。
+
+## 后续维护约束
+
+- 外设配置以 `F4Camera.ioc` 为源，优先通过 CubeMX 修改并重新生成。
+- CubeMX 生成文件只在 `USER CODE` 区域加入自定义代码。
+- 自定义外设驱动放入 `BSP/`，应用逻辑后续放入独立应用层，不继续堆入 `main.c`。
+- LCD/FSMC 初始化由 `MX_FSMC_Init()` 统一管理，LCD BSP 不得重复初始化 FSMC。
 - 不得把“配置存在”或“编译通过”写成“硬件验证成功”。
-- 在用户提供实际显示、串口或采集结果后，才能更新对应硬件状态。
-- 新增或修改的中文内容使用 UTF-8 编码。
+- 所有新增中文内容使用 UTF-8 编码保存。
 
 ## 下一次 AI 接手要求
 
-**下一次AI接手时必须先阅读本文件**
+**下一次AI接手时必须先阅读本文件。**
