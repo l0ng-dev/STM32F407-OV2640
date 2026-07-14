@@ -27,7 +27,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
 #include "lcd.h"
+#include "sccb.h"
+#include "ov2640.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,7 +51,8 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+static OV2640_ID_t ov2640_id;
+static SCCB_Status_t ov2640_status;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -59,6 +63,10 @@ static void LCD_Test_ShowId(uint16_t id);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+#if defined(__ARMCC_VERSION) && (__ARMCC_VERSION >= 6010050)
+__asm(".global __use_no_semihosting\n\t");
+__asm(".global __ARM_use_no_argv\n\t");
+#endif
 
 /* USER CODE END 0 */
 
@@ -98,6 +106,31 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  ov2640_status = SCCB_Init();
+  if (ov2640_status != SCCB_STATUS_OK)
+  {
+    printf("OV2640 ERROR: SCCB init failed (%u)\r\n", (unsigned int)ov2640_status);
+  }
+  else
+  {
+    ov2640_status = OV2640_Read_ID(&ov2640_id);
+    if (ov2640_status != SCCB_STATUS_OK)
+    {
+      printf("OV2640 ERROR: SCCB read failed (%u)\r\n", (unsigned int)ov2640_status);
+    }
+    else
+    {
+      printf("OV2640 PID: %02X\r\n", (unsigned int)ov2640_id.pid);
+      printf("OV2640 VER: %02X\r\n", (unsigned int)ov2640_id.ver);
+
+      if ((ov2640_id.pid != OV2640_PID_EXPECTED) ||
+          (ov2640_id.ver != OV2640_VER_EXPECTED))
+      {
+        printf("OV2640 ERROR: unexpected chip ID\r\n");
+      }
+    }
+  }
+
   /* FSMC初始化完成后再访问LCD。 */
   lcd_init();
 
@@ -169,6 +202,46 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+#if defined(__ARMCC_VERSION) && (__ARMCC_VERSION >= 6010050)
+FILE __stdout;
+
+int _ttywrch(int ch)
+{
+  return ch;
+}
+
+void _sys_exit(int status)
+{
+  (void)status;
+}
+
+char *_sys_command_string(char *command, int length)
+{
+  (void)command;
+  (void)length;
+  return NULL;
+}
+#endif
+
+/**
+  * @brief  将 printf 输出重定向到 USART1
+  * @param  ch: 待发送字符
+  * @param  stream: 标准输出流
+  * @retval 成功时返回字符，失败时返回 EOF
+  */
+int fputc(int ch, FILE *stream)
+{
+  uint8_t data = (uint8_t)ch;
+
+  (void)stream;
+  if (HAL_UART_Transmit(&huart1, &data, 1U, 100U) != HAL_OK)
+  {
+    return EOF;
+  }
+
+  return ch;
+}
+
 /**
   * @brief  以十六进制显示LCD控制器ID
   * @param  id: LCD控制器ID

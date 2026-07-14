@@ -8,7 +8,7 @@
 
 ## 1. 项目当前阶段
 
-当前阶段：**LCD/FSMC 迁移及第一次硬件验证已经完成，摄像头数据链路尚未开始迁移。**
+当前阶段：**OV2640 最小 SCCB 通信验证代码已完成并通过编译，等待硬件读取 PID/VER。**
 
 ### 已完成
 
@@ -18,11 +18,15 @@
 - ✅ 已完成：LCD BSP 加入 Keil 工程并配置头文件搜索路径。
 - ✅ 已完成：Keil Arm Compiler 6 编译和链接验证。
 - ✅ 已完成：LCD 实机显示验证。
+- ✅ 已完成：SCCB 通信模块迁移及 Keil 编译验证。
+- ✅ 已完成：OV2640 最小寄存器访问与 PID/VER 读取流程迁移。
+- ✅ 已完成：USART1 `printf` 调试输出接入及 Keil 编译验证。
 
 ### 未完成
 
-- ⏳ 未完成：OV2640 驱动迁移。
-- ⏳ 未完成：SCCB 通信驱动迁移。
+- ⏳ 未完成：SCCB 硬件通信验证。
+- ⏳ 未完成：OV2640 PID/VER 实机读取验证。
+- ⏳ 未完成：OV2640 完整寄存器初始化。
 - ⏳ 未完成：DCMI 实际采集流程。
 - ⏳ 未完成：DMA 图像缓存设计与采集启动。
 - ⏳ 未完成：JPEG 数据处理。
@@ -30,7 +34,7 @@
 
 ## 2. 已完成模块记录
 
-### LCD/FSMC 模块
+### LCD/FSMC 模块（迁移完成并通过硬件验证）
 
 #### 硬件与总线配置
 
@@ -118,12 +122,47 @@ LCD 测试内容
 
 | 类型 | 大小 |
 |---|---:|
-| Code | 23166 bytes |
-| RO-data | 18730 bytes |
+| Code | 28704 bytes |
+| RO-data | 18820 bytes |
 | RW-data | 16 bytes |
-| ZI-data | 2112 bytes |
-| Total ROM | 41912 bytes（40.93 KiB） |
-| Total RW | 2128 bytes（2.08 KiB） |
+| ZI-data | 2200 bytes |
+| Total ROM | 47540 bytes（46.43 KiB） |
+| Total RW | 2216 bytes（2.16 KiB） |
+
+### SCCB 通信模块
+
+#### 软件实现
+
+- ✅ 已完成：建立 `BSP/SCCB/`，包含 `sccb.c` 和 `sccb.h`。
+- ✅ 已完成：实现 SCCB 总线初始化、单字节寄存器写和单字节寄存器读。
+- ✅ 已完成：使用 `main.h` 中的 `SCCB_SCL`（PD6）和 `SCCB_SDA`（PD7）引脚定义。
+- ✅ 已完成：SCCB 初始化仅设置总线电平，不重新配置 CubeMX GPIO。
+- ✅ 已完成：提供无效参数、NACK 和总线超时状态返回。
+- ✅ 已完成：加入 Keil 的 `BSP/SCCB` 分组并通过 ArmClang V6.24 全量编译，结果为 0 Error、0 Warning。
+
+#### 验证范围
+
+- 当前只完成软件迁移和编译验证。
+- 尚未在 OV2640 硬件上验证 SCCB ACK、寄存器读写和总线波形。
+- SCCB 层不包含 OV2640 器件逻辑；DCMI、DMA 和 CubeMX 生成的 GPIO 初始化未修改。
+
+### OV2640 最小通信验证模块
+
+#### 软件实现
+
+- ✅ 已完成：建立 `BSP/OV2640/`，包含 `ov2640.c` 和 `ov2640.h`。
+- ✅ 已完成：通过现有 `BSP/SCCB` 接口实现 OV2640 单寄存器读写封装。
+- ✅ 已完成：使用 `main.h` 中的 `OV_PWDN` 和 `OV_RESET` 引脚定义执行上电退出和硬件复位时序，不重新初始化 GPIO。
+- ✅ 已完成：读取 Sensor Bank 的 PID（`0x0A`）和 VER（`0x0B`），期望值分别为 `0x26` 和 `0x42`。
+- ✅ 已完成：SCCB 初始化和每次寄存器访问均检查返回值；摄像头不存在时打印错误并继续进入主循环，不进入错误死循环。
+- ✅ 已完成：`printf` 重定向到 USART1，输出 PID、VER 或带状态码的错误信息。
+- ✅ 已完成：ArmClang V6.24 全量编译通过，结果为 0 Error、0 Warning。
+
+#### 验证范围
+
+- 当前只完成最小驱动、测试流程和编译验证，尚未连接硬件确认 PID/VER 返回值。
+- 本阶段没有导入完整 OV2640 初始化表，没有启动 DCMI/DMA，也没有实现 JPEG、LCD 图像显示或 USART 图像发送。
+- `Core/Src/gpio.c`、`Core/Src/dcmi.c`、`Core/Src/dma.c` 和 `F4Camera.ioc` 均未因本阶段修改。
 
 ## 3. 当前工程结构
 
@@ -132,12 +171,18 @@ LCD 测试内容
 ```text
 F4Camera/
 ├── BSP/
-│   └── LCD/
-│       ├── lcd.c
-│       ├── lcd.h
-│       ├── lcd_ex.c
-│       ├── lcd_ex.h
-│       └── lcdfont.h
+│   ├── LCD/
+│   │   ├── lcd.c
+│   │   ├── lcd.h
+│   │   ├── lcd_ex.c
+│   │   ├── lcd_ex.h
+│   │   └── lcdfont.h
+│   ├── SCCB/
+│   │   ├── sccb.c
+│   │   └── sccb.h
+│   └── OV2640/
+│       ├── ov2640.c
+│       └── ov2640.h
 ├── Core/
 │   ├── Inc/
 │   └── Src/
@@ -150,6 +195,8 @@ F4Camera/
 │   ├── startup_stm32f407xx.s
 │   └── F4Camera/                  # 本地 Keil 构建输出，Git 已忽略
 ├── F4Camera.ioc
+├── Docs/
+│   └── OV2640_SCCB通信验证报告.md
 ├── README.md
 └── PROJECT_STATUS.md
 ```
@@ -158,11 +205,13 @@ F4Camera/
 
 - `Core/`：CubeMX 生成的初始化代码、HAL MSP、异常与中断入口，以及当前主程序。
 - `BSP/LCD/`：正点原子 LCD 板级驱动、控制器扩展初始化和字库。
+- `BSP/SCCB/`：基于 CubeMX 现有 GPIO 的 SCCB 通信驱动。
+- `BSP/OV2640/`：OV2640 最小寄存器访问、硬件复位和 PID/VER 读取驱动。
 - `Drivers/`：STM32F4 HAL 驱动与 CMSIS 设备支持文件。
 - `MDK-ARM/`：Keil 工程、启动文件和本地构建输出。
 - `F4Camera.ioc`：CubeMX 外设、引脚和时钟配置源文件。
 
-当前不存在独立的 `Application/`、`BSP/OV2640/` 或 `BSP/JPEG/` 目录，不应在摄像头迁移前提前写入工程结构。
+当前不存在独立的 `Application/` 或 `BSP/JPEG/` 目录。
 
 ## 4. CubeMX 配置状态
 
@@ -171,7 +220,7 @@ F4Camera/
 | RCC | ✅ 已完成 | HSE = 8 MHz，SYSCLK/HCLK = 168 MHz，APB1 = 42 MHz，APB2 = 84 MHz；已支持当前程序和 LCD 实机运行。 |
 | GPIO | ✅ 已完成 | 已生成 FSMC、LCD 背光、DCMI、SCCB 预留、OV2640 控制和 USART 引脚配置。摄像头相关引脚尚未进行通信验证。 |
 | FSMC | ✅ 已完成 | Bank1 NOR/SRAM4、16 bit、NE4/A6、Extended Mode；已完成 LCD 实机验证。 |
-| USART1 | ⚠️ 部分完成 | PA9/PA10，115200，TX/RX；只有初始化代码，尚无调试输出流程。 |
+| USART1 | ⚠️ 部分完成 | PA9/PA10，115200，TX/RX；已用于 OV2640 最小验证的 `printf` 调试输出，尚未进行实机串口验证。 |
 | USART2 | ⚠️ 部分完成 | PA2/PA3，921600，当前 HAL 模式为 TX；尚无图像协议和发送代码。 |
 | DCMI | ⚠️ 部分完成 | 硬件同步、8 bit、全帧、PCLK 上升沿，当前 `JPEGMode = DISABLE`；仅有 CubeMX 初始化代码。 |
 | DMA | ⚠️ 部分完成 | DCMI 使用 DMA2 Stream1 / Channel 1、循环模式、Very High 优先级；仅有 CubeMX 配置和 HAL 链接。 |
@@ -208,7 +257,7 @@ DCMI/DMA 目前只是 CubeMX 配置和生成代码存在。工程中没有 `HAL_
 
 ### Milestone
 
-**LCD/FSMC Migration Completed**
+**LCD/FSMC 迁移完成并通过硬件验证**
 
 完成内容：
 
@@ -222,27 +271,35 @@ DCMI/DMA 目前只是 CubeMX 配置和生成代码存在。工程中没有 `HAL_
 | 项目 | 当前值 |
 |---|---|
 | 分支 | `main` |
-| 基线提交 | `e7f035120e11b6be54afb4db1c48bf1cc0c8ad16` |
+| 里程碑基线 commit | `e7f0351` |
+| 当前 HEAD | `0358ecf` |
 | 版本标签 | `v1.0.0` |
 | Release | `STM32F407 OV2640 Camera Project v1.0.0` |
 | 里程碑状态 | ✅ 已完成 |
 
-本次文档更新只允许修改 `PROJECT_STATUS.md`。源码、CubeMX 配置、Keil 配置和工程结构均保持不变。
+`e7f0351` 是 LCD/FSMC 初始工程与 `v1.0.0` 发布对应的里程碑基线；`0358ecf` 是当前分支最新提交，在该基线之后更新了项目状态文档。两者用途不同：前者用于标识里程碑起点，后者表示当前实际检出的仓库版本。
+
+SCCB 阶段在 `BSP/SCCB/` 中新增独立通信模块，并将其接入 Keil 工程；CubeMX 配置和生成代码保持不变。
+
+OV2640 最小验证阶段新增 `BSP/OV2640/`，并在 `main.c` 的 USER CODE 区接入 USART1 输出；当前工作区改动尚未形成新的 Git 提交。
 
 ## 7. 下一步计划
 
-### Step 1：迁移 SCCB 驱动
+### Step 1：SCCB 通信与 OV2640 ID 硬件验证（当前目标）
 
 目标：
 
-- 在 BSP 层实现 SCCB 起始、停止、读写和 ACK 流程。
-- 读取 OV2640 PID/VER，确认 SCCB 通信和硬件连接正常。
+- 调用 `SCCB_Init()` 释放总线到空闲状态。
+- 确认 SCCB 空闲电平、应答和读写时序正常。
+- 通过硬件测试确认 SCCB 总线与摄像头连接可用。
+- 通过 SCCB 读取 OV2640 PID/VER 寄存器。
+- 确认串口输出为 PID `26`、VER `42`；异常时结合返回状态和总线波形定位问题。
 
-### Step 2：迁移 OV2640 驱动
+### Step 2：摄像头初始化
 
 目标：
 
-- 完成上电、PWDN、RESET 和寄存器初始化流程。
+- 完成 OV2640 上电、PWDN、RESET 和寄存器初始化流程。
 - 完成摄像头基础格式与分辨率配置。
 
 ### Step 3：验证 DCMI DMA 采集

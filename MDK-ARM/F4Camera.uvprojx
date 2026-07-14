@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;..\BSP\LCD</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;..\BSP\LCD;..\BSP\SCCB;..\BSP\OV2640</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -583,6 +583,26 @@
               <FileName>lcd_ex.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\BSP\LCD\lcd_ex.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>BSP/SCCB</GroupName>
+          <Files>
+            <File>
+              <FileName>sccb.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\SCCB\sccb.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>BSP/OV2640</GroupName>
+          <Files>
+            <File>
+              <FileName>ov2640.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\OV2640\ov2640.c</FilePath>
             </File>
           </Files>
         </Group>
