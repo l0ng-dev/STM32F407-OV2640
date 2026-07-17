@@ -7,6 +7,8 @@
 
 #include "ov2640.h"
 
+#include <stdio.h>
+
 #define OV2640_REG_BANK_SELECT       0xFFU
 #define OV2640_BANK_DSP              0x00U
 #define OV2640_BANK_SENSOR           0x01U
@@ -80,6 +82,20 @@ static const OV2640_RegisterConfig_t ov2640_uxga_init_table[] =
     {0x5CU, 0x05U}, {0xD3U, 0x02U}, {0xC3U, 0xEDU}, {0x7FU, 0x00U},
     {0xDAU, 0x09U}, {0xE5U, 0x1FU}, {0xE1U, 0x67U}, {0xE0U, 0x00U},
     {0xDDU, 0x7FU}, {0x05U, 0x00U}
+};
+
+/* 正点原子实验24中 JPEG 模式使用的 YUV422 前置配置表。 */
+static const OV2640_RegisterConfig_t ov2640_yuv422_table[] =
+{
+    {0xFFU, 0x00U}, {0xDAU, 0x10U}, {0xD7U, 0x03U}, {0xDFU, 0x00U},
+    {0x33U, 0x80U}, {0x3CU, 0x40U}, {0xE1U, 0x77U}, {0x00U, 0x00U}
+};
+
+/* 正点原子实验24中用于开启 OV2640 JPEG 输出的寄存器配置表。 */
+static const OV2640_RegisterConfig_t ov2640_jpeg_table[] =
+{
+    {0xFFU, 0x01U}, {0xE0U, 0x14U}, {0xE1U, 0x77U}, {0xE5U, 0x1FU},
+    {0xD7U, 0x03U}, {0xDAU, 0x10U}, {0xE0U, 0x00U}
 };
 
 /* 正点原子实验24的 RGB565 输出格式配置表。 */
@@ -174,6 +190,23 @@ OV2640_Status_t OV2640_Init(void)
     return OV2640_MapSccbStatus(sccb_status);
 }
 
+SCCB_Status_t OV2640_SetJPEGMode(void)
+{
+    SCCB_Status_t status;
+
+    status = OV2640_WriteTable(
+        ov2640_yuv422_table,
+        (uint16_t)(sizeof(ov2640_yuv422_table) / sizeof(ov2640_yuv422_table[0])));
+    if (status != SCCB_STATUS_OK)
+    {
+        return status;
+    }
+
+    return OV2640_WriteTable(
+        ov2640_jpeg_table,
+        (uint16_t)(sizeof(ov2640_jpeg_table) / sizeof(ov2640_jpeg_table[0])));
+}
+
 SCCB_Status_t OV2640_SetOutputSize(uint16_t width, uint16_t height)
 {
     SCCB_Status_t status;
@@ -217,6 +250,83 @@ SCCB_Status_t OV2640_SetOutputSize(uint16_t width, uint16_t height)
 
     restore_status = OV2640_WriteReg(OV2640_DSP_RESET, 0x00U);
     return (status != SCCB_STATUS_OK) ? status : restore_status;
+}
+
+SCCB_Status_t OV2640_Debug_ReadMode(void)
+{
+    static const uint8_t dsp_registers[] =
+    {
+        0xE0U, 0xE1U, 0xE5U, 0xD7U, 0xDAU, 0xDFU,
+        0x5AU, 0x5BU, 0x5CU
+    };
+    static const uint8_t sensor_registers[] =
+    {
+        0xE0U, 0xE1U, 0xE5U, 0xD7U, 0xDAU
+    };
+    uint8_t dsp_values[sizeof(dsp_registers)];
+    uint8_t sensor_values[sizeof(sensor_registers)];
+    SCCB_Status_t status;
+    SCCB_Status_t restore_status;
+    uint32_t index;
+
+    status = OV2640_WriteReg(OV2640_REG_BANK_SELECT, OV2640_BANK_DSP);
+    for (index = 0U;
+         (status == SCCB_STATUS_OK) && (index < sizeof(dsp_registers));
+         ++index)
+    {
+        status = OV2640_ReadReg(dsp_registers[index], &dsp_values[index]);
+    }
+
+    if (status == SCCB_STATUS_OK)
+    {
+        printf("DSP Bank:\r\n");
+        printf("E0=%02X\r\n", (unsigned int)dsp_values[0]);
+        printf("E1=%02X\r\n", (unsigned int)dsp_values[1]);
+        printf("E5=%02X\r\n", (unsigned int)dsp_values[2]);
+        printf("D7=%02X\r\n", (unsigned int)dsp_values[3]);
+        printf("DA=%02X\r\n", (unsigned int)dsp_values[4]);
+        printf("DF=%02X\r\n", (unsigned int)dsp_values[5]);
+    }
+
+    if (status == SCCB_STATUS_OK)
+    {
+        status = OV2640_WriteReg(OV2640_REG_BANK_SELECT, OV2640_BANK_SENSOR);
+    }
+    for (index = 0U;
+         (status == SCCB_STATUS_OK) && (index < sizeof(sensor_registers));
+         ++index)
+    {
+        status = OV2640_ReadReg(sensor_registers[index], &sensor_values[index]);
+    }
+
+    if (status == SCCB_STATUS_OK)
+    {
+        printf("Sensor Bank:\r\n");
+        printf("E0=%02X\r\n", (unsigned int)sensor_values[0]);
+        printf("E1=%02X\r\n", (unsigned int)sensor_values[1]);
+        printf("E5=%02X\r\n", (unsigned int)sensor_values[2]);
+        printf("D7=%02X\r\n", (unsigned int)sensor_values[3]);
+        printf("DA=%02X\r\n", (unsigned int)sensor_values[4]);
+        printf("Output Size Registers:\r\n");
+        printf("5A=%02X\r\n", (unsigned int)dsp_values[6]);
+        printf("5B=%02X\r\n", (unsigned int)dsp_values[7]);
+        printf("5C=%02X\r\n", (unsigned int)dsp_values[8]);
+    }
+
+    restore_status = OV2640_WriteReg(OV2640_REG_BANK_SELECT, OV2640_BANK_DSP);
+    if (status != SCCB_STATUS_OK)
+    {
+        printf("OV2640 Debug Read Failed: %u\r\n", (unsigned int)status);
+        return status;
+    }
+
+    if (restore_status != SCCB_STATUS_OK)
+    {
+        printf("OV2640 Debug Bank Restore Failed: %u\r\n",
+               (unsigned int)restore_status);
+    }
+
+    return restore_status;
 }
 
 /**

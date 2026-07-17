@@ -74,12 +74,26 @@ void OV2640_HardwareReset(void);
 OV2640_Status_t OV2640_Init(void);
 
 /**
+ * @brief  将已初始化的 OV2640 切换为 JPEG 输出模式
+ * @note   仅写入 YUV422 和 JPEG 配置，不重新初始化 GPIO 或 SCCB
+ * @retval SCCB 操作状态
+ */
+SCCB_Status_t OV2640_SetJPEGMode(void);
+
+/**
  * @brief  设置 DSP 输出分辨率
  * @param  width  输出宽度，必须为 4 的倍数
  * @param  height 输出高度，必须为 4 的倍数
  * @retval SCCB 操作状态
  */
 SCCB_Status_t OV2640_SetOutputSize(uint16_t width, uint16_t height);
+
+/**
+ * @brief  回读并输出 OV2640 JPEG 模式相关寄存器
+ * @note   依次读取 DSP Bank、Sensor Bank，结束时恢复到 DSP Bank
+ * @retval SCCB 操作状态
+ */
+SCCB_Status_t OV2640_Debug_ReadMode(void);
 
 #ifdef __cplusplus
 }

@@ -8,7 +8,7 @@
 
 ## 1. 项目当前阶段
 
-当前阶段：**Camera Frame Display on LCD（第六阶段）已完成软件和硬件闭环验证。**
+当前阶段：**320×240 RGB565 实时 LCD 全屏预览（Snapshot 循环采集，DMA 直接写 FSMC LCD GRAM）。**
 
 ### 已完成
 
@@ -28,12 +28,18 @@
 - ✅ 已完成：实现 160×120 RGB565、DCMI snapshot、DMA normal 到内部 SRAM 的最小单帧采集软件流程。
 - ✅ 已完成：实机串口输出 `DCMI Frame OK`，确认 DCMI/DMA 单帧完成链路正常。
 - ✅ 已完成：将 160×120 RGB565 帧缓冲通过现有 `lcd_color_fill()` 居中写入 LCD，Keil 全量编译通过。
-- ✅ 已完成：LCD 中央区域成功显示 OV2640 采集的 QQVGA RGB565 画面，串口输出 `LCD Frame Drawn`。
+- ✅ 已完成：LCD 显示功能代码，支持将 QQVGA 160×120 RGB565 帧缓冲居中写入 LCD；写屏位于主循环，不在 DCMI 中断中刷新 LCD。
+- ✅ 已完成：RGB565 图像已通过 LCD 实机显示验证。
+- ✅ 已完成：放弃 JPEG + USART2 路线，将 OV2640 恢复为 RGB565 初始化输出，并将 DCMI 恢复为 `DCMI_JPEG_DISABLE`。
+- ✅ 已完成：实现 QQVGA 160×120 Snapshot 循环采集；每帧完成后由主循环刷新 LCD，刷新完成后启动下一帧。
+- ✅ 已完成：RGB565 实时预览软件通过 Keil AC6 全量编译，结果为 0 Error、0 Warning。
+- ✅ 已完成：OV2640 输出尺寸提升到 320×240，DCMI DMA 直接写入 FSMC LCD GRAM。
+- ✅ 已完成：LCD 初始化完成后，根据 LCD 控制器 ID 将 FSMC 扩展写时序由 9/9 优化为 3/3。
+- ✅ 已完成：320×240 RGB565 实时 LCD 全屏预览已通过硬件验证。
 
 ### 未完成
 
-- ⏳ 未完成：JPEG 数据处理。
-- ⏳ 未完成：USART 图像输出。
+- ⏳ 未完成：实际帧率统计和长时间运行稳定性量化记录。
 
 ## 2. 已完成模块记录
 
@@ -53,7 +59,7 @@
 | 扩展模式 | Enabled，读写时序分离 |
 
 FSMC 读时序：AddressSetupTime = 15，DataSetupTime = 60。  
-FSMC 写时序：AddressSetupTime = 9，DataSetupTime = 9。
+FSMC 初始化写时序：AddressSetupTime = 9，DataSetupTime = 9。LCD 控制器初始化完成后，ILI9341、ST7789、ST7796、NT35310 和 NT35510 动态切换为 AddressSetupTime = 3、DataSetupTime = 3；其他控制器保持初始化时序。
 
 #### 地址映射
 
@@ -189,7 +195,7 @@ LCD 测试内容
 - 主循环检测到完整帧后，将 `uint32_t[9600]` 缓冲按 RGB565 16 位像素传给现有 `lcd_color_fill()`。
 - 160×120 画面根据 `lcddev.width`、`lcddev.height` 计算起点，并以原始尺寸居中显示，不做缩放。
 - 写屏完成后 USART1 输出 `LCD Frame Drawn`，用于确认程序已执行到 LCD GRAM 写入完成位置。
-- ✅ 已完成：LCD 实机成功显示 OV2640 采集的 RGB565 画面，第六阶段已完成软件和硬件闭环验证。
+- ✅ 已完成：LCD 显示代码和RGB565摄像头画面实机验证。
 
 #### 第六阶段代码修改记录
 
@@ -203,7 +209,7 @@ LCD 测试内容
 
 该实现保持中断快速响应原则：DCMI 中断只负责通知主循环，完整帧的 LCD 刷新由主循环处理。
 
-#### 第六阶段硬件验证结果
+#### 第六阶段当前验证状态
 
 | 验证项 | 结果 |
 |---|---|
@@ -214,10 +220,11 @@ LCD 测试内容
 | DMA Normal 单帧搬运 | ✅ 实机验证成功 |
 | FSMC/LCD 通信 | ✅ 正常 |
 | LCD 基础显示 | ✅ 正常 |
-| 摄像头 RGB565 画面显示 | ✅ 成功 |
-| USART1 调试输出 | ✅ 正常 |
+| 摄像头 RGB565 画面显示代码 | ✅ 已完成 |
+| 摄像头 RGB565 画面实际显示 | ✅ 实机验证成功 |
+| USART1 已有调试输出 | ✅ 正常 |
 
-实机串口输出：
+LCD 显示验证时的预期串口输出：
 
 ```text
 OV2640 PID: 26
@@ -227,9 +234,9 @@ DCMI Frame OK
 LCD Frame Drawn
 ```
 
-#### 第六阶段验证结论
+#### 第六阶段当前结论
 
-当前完整链路已经打通：
+当前软件目标链路：
 
 ```text
 OV2640
@@ -245,7 +252,7 @@ RGB565 Frame Buffer
 FSMC LCD 显示
 ```
 
-状态：✅ Camera image displayed on LCD successfully。
+状态：✅ DCMI/DMA和RGB565摄像头画面LCD显示均已通过硬件验证。
 
 #### 第六阶段保持未修改记录
 
@@ -310,7 +317,7 @@ F4Camera/
 | 模块 | 状态 | 当前配置与验证范围 |
 |---|---|---|
 | RCC | ✅ 已完成 | HSE = 8 MHz，SYSCLK/HCLK = 168 MHz，APB1 = 42 MHz，APB2 = 84 MHz；已支持当前程序和 LCD 实机运行。 |
-| GPIO | ✅ 已完成 | 已生成 FSMC、LCD 背光、DCMI、SCCB、OV2640 控制和 USART 引脚配置；SCCB、OV2640 控制、DCMI 数据与同步引脚均已通过完整图像链路实机验证。 |
+| GPIO | ✅ 已完成 | 已生成 FSMC、LCD 背光、DCMI、SCCB、OV2640 控制和 USART 引脚配置；SCCB、OV2640 控制、DCMI 数据与同步引脚均已通过 SCCB 通信或 DCMI/DMA 采集实机验证。 |
 | FSMC | ✅ 已完成 | Bank1 NOR/SRAM4、16 bit、NE4/A6、Extended Mode；已完成 LCD 实机验证。 |
 | USART1 | ✅ 已完成 | PA9/PA10，115200，TX/RX；已通过实机串口输出 PID、VER 和 OV2640 初始化状态。 |
 | USART2 | ⚠️ 部分完成 | PA2/PA3，921600，当前 HAL 模式为 TX；尚无图像协议和发送代码。 |
@@ -318,7 +325,7 @@ F4Camera/
 | DMA | ✅ 已完成 | DCMI 使用 DMA2 Stream1 / Channel 1、Normal 模式、32 位对齐、Very High 优先级；38,400 字节静态 SRAM 单帧传输已通过实机验证。 |
 | TIM6 | ⚠️ 部分完成 | 已生成约 1 Hz 的基础定时器配置，当前应用未启动使用。 |
 
-DCMI/DMA 已形成 OV2640 → DCMI → DMA → 内部 SRAM 的最小采集链路，并通过 `DCMI Frame OK` 实机验证；帧缓冲数据也已通过 FSMC LCD 成功显示。
+DCMI/DMA 已形成 OV2640 → DCMI → DMA → 内部 SRAM → FSMC LCD 的采集显示链路，并已通过RGB565单帧画面实机验证。
 
 ## 5. 硬件状态
 
@@ -337,7 +344,7 @@ DCMI/DMA 已形成 OV2640 → DCMI → DMA → 内部 SRAM 的最小采集链路
 - ✅ 已完成：LCD 初始化、ID 读取、字符显示和 RGB 色块显示正常。
 - ✅ 已完成：OV2640 SCCB 通信、硬件复位、PID `0x26`、VER `0x42` 和 RGB565 寄存器初始化正常。
 - ✅ 已完成：QQVGA 160×120 DCMI Snapshot 与 DMA Normal 单帧采集正常，串口输出 `DCMI Frame OK`。
-- ✅ 已完成：160×120 RGB565 摄像头画面已显示在 LCD 中央区域，串口输出 `LCD Frame Drawn`。
+- ✅ 已完成：320×240 RGB565、DCMI Snapshot、DMA Normal 直接写 FSMC LCD GRAM 的全屏实时预览正常。
 
 ### 未完成
 
@@ -348,7 +355,7 @@ DCMI/DMA 已形成 OV2640 → DCMI → DMA → 内部 SRAM 的最小采集链路
 
 ### Milestone
 
-**LCD/FSMC 迁移完成并通过硬件验证**
+**320×240 RGB565 实时 LCD 全屏预览完成并通过硬件验证**
 
 完成内容：
 
@@ -363,72 +370,69 @@ DCMI/DMA 已形成 OV2640 → DCMI → DMA → 内部 SRAM 的最小采集链路
 |---|---|
 | 分支 | `main` |
 | 里程碑基线 commit | `e7f0351` |
-| 当前 HEAD | `d64234f` |
-| 版本标签 | `v1.0.0` |
-| Release | `STM32F407 OV2640 Camera Project v1.0.0` |
+| 发布提交 | 由 `v1.1.0` 标签指向本次发布提交 |
+| 版本标签 | `v1.0.0`（保留）、`v1.1.0`（当前版本） |
+| Release | `STM32F407 OV2640 RGB565 Camera Preview v1.1.0` |
 | 里程碑状态 | ✅ 已完成 |
 
 `e7f0351` 是 LCD/FSMC 初始工程与 `v1.0.0` 发布对应的里程碑基线；`d64234f` 是当前实际检出的提交，包含 SCCB、OV2640 PID/VER 最小验证和 USART1 调试输出。两者用途不同：前者用于标识 LCD/FSMC 里程碑起点，后者表示本阶段开始时的仓库版本。
 
 SCCB 阶段在 `BSP/SCCB/` 中新增独立通信模块，并将其接入 Keil 工程；CubeMX 配置和生成代码保持不变。
 
-OV2640 最小验证阶段新增 `BSP/OV2640/`，并在 `main.c` 的 USER CODE 区接入 USART1 输出；当前工作区改动尚未形成新的 Git 提交。
+OV2640 最小验证阶段新增 `BSP/OV2640/`，并在 `main.c` 的 USER CODE 区接入 USART1 输出。
 
-OV2640 完整初始化阶段在现有 `BSP/OV2640/` 内扩展初始化表和错误返回；当前工作区改动尚未形成新的 Git 提交。
+OV2640 完整初始化阶段在现有 `BSP/OV2640/` 内扩展初始化表和错误返回。
 
 SCCB 初始化失败修复阶段记录：实机曾输出 `OV2640 ERROR: SCCB init failed (3)`，其中状态码 3 为总线超时。将 PD6/PD7 默认输出状态改为高电平，并把硬件复位移动到 `SCCB_Init()` 之前后，实机已成功输出 PID `26`、VER `42` 和 `OV2640 Init OK`。
 
-第六阶段完成记录：收到完整 DCMI 帧后，由帧回调仅设置通知标志，主循环调用 `lcd_color_fill()` 将 QQVGA 160×120 RGB565 帧缓冲显示到 LCD 中央区域。实机已依次输出 `DCMI Frame OK` 和 `LCD Frame Drawn`，摄像头画面显示正常，完成软件和硬件闭环验证；该阶段工作区改动尚未形成新的 Git 提交。
+第六阶段开发记录：收到完整 DCMI 帧后，由帧回调仅设置通知标志，主循环调用 `lcd_color_fill()` 将 QQVGA 160×120 RGB565 帧缓冲居中写入 LCD。DCMI/DMA单帧采集和RGB565摄像头画面LCD显示均已通过实机验证。
 
 ## 7. 下一步计划
 
-### 第六阶段历史计划（✅ 已完成）
+### 第六阶段：LCD 摄像头画面实机验证（已完成）
 
-已完成：
+当前状态：
 
-- 已使用当前固件确认串口依次输出 `DCMI Frame OK` 和 `LCD Frame Drawn`。
-- 已确认 LCD 中央 160×120 区域能够正常显示摄像头 RGB565 画面。
-- 实机画面未发现需要在本阶段处理的 RGB565 颜色异常。
+- ✅ 已完成：DCMI/DMA 单帧采集硬件验证，串口能够输出 `DCMI Frame OK`。
+- ✅ 已完成：LCD 显示代码，支持 160×120 RGB565 居中显示，并在主循环执行 FSMC 写屏。
+- ✅ 已完成：LCD中央区域能够实际显示RGB565摄像头画面。
+- ✅ 已完成：确认完成写屏后串口输出 `LCD Frame Drawn`。
 
-### Phase 7：JPEG + USART2 Transmission（下一阶段）
+### Phase 7：320×240 RGB565 实时 LCD 全屏预览（已完成）
 
 目标链路：
 
 ```text
 OV2640
 ↓
-DCMI JPEG Mode
+DCMI Snapshot
 ↓
-JPEG 数据缓存
+DMA2 Stream1 / Channel 1
 ↓
-USART2 921600 bps
+FSMC LCD GRAM
 ↓
-PC XCAM 显示
+320×240 LCD 全屏显示
 ```
 
-#### 子目标 1：实现 JPEG 数据处理
+当前实现策略：
 
-目标：
-
-- 确认 OV2640 JPEG 输出和 DCMI JPEG 模式。
-- 实现 JPEG 帧边界、有效长度和缓存溢出处理。
-
-#### 子目标 2：实现 USART2 图像输出
-
-目标：
-
-- 使用 USART2 921600 bps 输出 JPEG 数据，并完成 PC XCAM 显示验证。
-- 根据吞吐量评估 USART2 DMA 发送。
+- OV2640 输出 320×240 RGB565。
+- 使用 `DCMI_MODE_SNAPSHOT` 和 DMA Normal。
+- DCMI帧回调只设置完成标志。
+- DMA 运行时配置为外设 Word、目标 HalfWord、目标地址不递增，直接写入 LCD GRAM。
+- 主循环在每帧完成后启动下一次 Snapshot。
+- 暂不使用 Continuous、Circular 或双缓冲。
 
 ## 8. 保留问题与设计记录
 
-- ⏳ 未完成：当前 DCMI 配置为 `DCMI_JPEG_DISABLE`，第七阶段需要结合 OV2640 JPEG 输出切换并验证 DCMI JPEG 模式。
-- ⚠️ 部分完成：JPEG 缓存大小、帧最大长度、溢出处理和缓冲策略需要后续评估。
+- ✅ 已完成：项目路线调整为 RGB565 实时 LCD 预览；JPEG + USART2 + XCAM 路线已停止，不再作为下一阶段目标。
+- 历史记录：DCMI曾配置为 `DCMI_JPEG_ENABLE` 并通过编译；当前路线已经恢复为 `DCMI_JPEG_DISABLE`。
+- ⚠️ 部分完成：已实现64KB JPEG缓存、DMA实际长度计算、SOI/EOI解析及溢出保护；软件编译通过，硬件采集结果待验证。
 - ⚠️ 部分完成：USART2 当前为 921600 baud、TX 模式，后续需要评估 DMA 发送和分包机制。
 - ✅ 已完成：OV2640 模块硬件时钟来源已经确认，当前模块自带晶振，不需要由 STM32 输出 XCLK。
-- ✅ 已完成：DCMI DMA 当前使用 Normal 模式和 Very High 优先级，QQVGA RGB565 单帧采集与 LCD 显示已通过实机验证；后续连续采集策略和中断优先级留待新阶段评估。
-- ✅ 已完成：38,400 字节帧缓冲区位于 `0x200000D4`，属于 DMA 可访问的内部 SRAM，不使用 Cortex-M4 CCM RAM。
-- ✅ 已完成：当前 DCMI PCLK、HSYNC、VSYNC 极性已通过 OV2640 → DCMI → DMA → LCD 完整链路实机验证。
+- ✅ 已完成：DCMI DMA 当前使用 Normal 模式和 Very High 优先级，320×240 RGB565 Snapshot 循环采集与 LCD 全屏显示已通过实机验证。
+- 历史记录：160×120 阶段使用 38,400 字节内部 SRAM 帧缓冲；当前 320×240 路线由 DMA 直接写 LCD GRAM，不再占用该帧缓冲。
+- ✅ 已完成：当前 DCMI PCLK、HSYNC、VSYNC 极性以及 OV2640 → DCMI → DMA → FSMC LCD GRAM 完整链路已通过硬件验证。
 
 ## 后续维护约束
 
@@ -438,6 +442,38 @@ PC XCAM 显示
 - LCD/FSMC 初始化由 `MX_FSMC_Init()` 统一管理，LCD BSP 不得重复初始化 FSMC。
 - 不得把“配置存在”或“编译通过”写成“硬件验证成功”。
 - 所有新增中文内容使用 UTF-8 编码保存。
+
+## 9. JPEG采集模块阶段（软件实现完成，待硬件验证）
+
+> 历史记录：该路线已停止。相关源码暂时保留，但当前主程序不再调用，64KB JPEG缓存未链接进现行固件。
+
+- ✅ 已完成：新增 `BSP/Camera`，复用CubeMX生成的 `hdcmi`、`hdma_dcmi`，使用Snapshot、DMA Normal和Word传输启动采集。
+- ✅ 已完成：新增 `Application/JPEG`，提供64KB、4字节对齐的静态缓存及SOI `FF D8`、EOI `FF D9`解析。
+- ✅ 已完成：通过DMA NDTR计算原始接收字节数，并实现缓存溢出、DCMI错误、DMA错误、无SOI和无EOI错误码。
+- ✅ 已完成：Keil ArmClang AC6全量编译为0 Error、0 Warning；MAP确认缓存位于 `0x200002B4` 的普通SRAM1，不在CCM。
+- ⚠️ 部分完成：当前软件已具备输出 `JPEG Frame OK` 和JPEG有效长度的能力，尚未完成实机采集验证。
+- ⏳ 未完成：USART2 JPEG发送和PC端XCAM显示。
+
+当前阶段数据链路：
+
+```text
+OV2640 JPEG → DCMI JPEG → DMA2 Stream1/Channel1 → 64KB SRAM Buffer → SOI/EOI解析
+```
+
+详细设计与编译记录见 `Docs/JPEG采集模块实现报告.md`。
+
+## 10. RGB565实时LCD预览阶段
+
+- ✅ 已完成：OV2640启动流程只执行已验证的 `OV2640_Init()` RGB565配置，不再调用JPEG模式切换。
+- ✅ 已完成：`F4Camera.ioc` 与 `Core/Src/dcmi.c` 均恢复为 `DCMI_JPEG_DISABLE`。
+- ✅ 已完成：保持DMA2 Stream1 / Channel 1、Normal模式，运行时配置为外设 Word、目标 HalfWord和目标地址不递增。
+- ✅ 已完成：首次Snapshot在LCD初始化完成后启动，避免LCD初始化阶段与采集流程交叠。
+- ✅ 已完成：每次帧回调只设置 `dcmi_frame_ready`，不在中断中执行FSMC写屏或串口打印。
+- ✅ 已完成：DMA直接写FSMC LCD GRAM，主循环收到完整帧通知后启动下一次Snapshot。
+- ✅ 已完成：LCD初始化完成后按控制器ID将FSMC写时序从9/9动态优化到3/3。
+- ✅ 已完成：Keil ArmClang AC6全量编译为0 Error、0 Warning；Code=32444、RO-data=19340、RW-data=16、ZI-data=2208 bytes。
+- ✅ 已完成：320×240 RGB565实时LCD全屏预览已通过硬件验证。
+- ⏳ 未完成：统计实际帧率并记录长时间运行稳定性。
 
 ## 下一次 AI 接手要求
 

@@ -20,6 +20,7 @@
 
 #include <stdlib.h>
 #include "main.h"
+#include "fsmc.h"
 #include "lcd.h"
 #include "lcd_ex.h"
 #include "lcdfont.h"
@@ -1130,6 +1131,41 @@ void lcd_show_string(uint16_t x, uint16_t y, uint16_t width, uint16_t height, ui
 }
 
 /**
+ * @brief       LCD初始化完成后优化FSMC异步写时序
+ * @note        ID读取和控制器寄存器初始化仍使用CubeMX配置的保守时序。
+ *              仅对已确认的控制器型号将扩展写时序调整为3/3，
+ *              未识别或未列出的控制器继续保持原时序。
+ * @param       无
+ * @retval      无
+ */
+static void lcd_fsmc_write_timing_optimize(void)
+{
+    FSMC_NORSRAM_TimingTypeDef write_timing = {0};
+
+    if ((lcddev.id != 0X9341) &&
+        (lcddev.id != 0X7789) &&
+        (lcddev.id != 0X7796) &&
+        (lcddev.id != 0X5310) &&
+        (lcddev.id != 0X5510))
+    {
+        return;
+    }
+
+    write_timing.AddressSetupTime = 3;
+    write_timing.AddressHoldTime = 15;
+    write_timing.DataSetupTime = 3;
+    write_timing.BusTurnAroundDuration = 0;
+    write_timing.CLKDivision = 16;
+    write_timing.DataLatency = 17;
+    write_timing.AccessMode = FSMC_ACCESS_MODE_A;
+
+    (void)FSMC_NORSRAM_Extended_Timing_Init(hsram4.Extended,
+                                            &write_timing,
+                                            hsram4.Init.NSBank,
+                                            hsram4.Init.ExtendedMode);
+}
+
+/**
  * @brief   初始化LCD
  * @param   无
  * @retval  无
@@ -1263,6 +1299,7 @@ void lcd_init(void)
         lcd_ssd_backlight_set(100); /* 背光设置为最亮 */
     }
     
+    lcd_fsmc_write_timing_optimize();
     lcd_display_dir(0);                                                                     /* 默认设置为竖屏 */
     LCD_BL(1);                                                                              /* 点亮背光 */
     lcd_clear(WHITE);                                                                       /* 清屏 */

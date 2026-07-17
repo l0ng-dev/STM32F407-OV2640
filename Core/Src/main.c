@@ -40,8 +40,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define DCMI_FRAME_WIDTH       160U
-#define DCMI_FRAME_HEIGHT      120U
+#define DCMI_FRAME_WIDTH       320U
+#define DCMI_FRAME_HEIGHT      240U
 #define DCMI_BYTES_PER_PIXEL   2U
 #define DCMI_FRAME_WORD_COUNT  ((DCMI_FRAME_WIDTH * DCMI_FRAME_HEIGHT * \
                                  DCMI_BYTES_PER_PIXEL) / sizeof(uint32_t))
@@ -56,20 +56,21 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-static OV2640_ID_t ov2640_id;
 static SCCB_Status_t ov2640_status;
 static OV2640_Status_t ov2640_init_status;
-static uint32_t dcmi_frame_buffer[DCMI_FRAME_WORD_COUNT];
 static volatile uint8_t dcmi_frame_ready;
 static volatile uint8_t dcmi_error_pending;
 static volatile uint32_t dcmi_error_code;
+static uint8_t camera_preview_ready;
+extern DMA_HandleTypeDef hdma_dcmi;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 static void LCD_Test_ShowId(uint16_t id);
-static void LCD_ShowCameraFrame(void);
+static HAL_StatusTypeDef DCMI_ConfigureLcdDirectDma(void);
+static HAL_StatusTypeDef DCMI_StartRgb565Snapshot(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -134,40 +135,25 @@ int main(void)
     }
     else
     {
-      ov2640_status = OV2640_Read_ID(&ov2640_id);
-      if ((ov2640_status != SCCB_STATUS_OK) ||
-          (ov2640_id.pid != OV2640_PID_EXPECTED) ||
-          (ov2640_id.ver != OV2640_VER_EXPECTED))
+      printf("OV2640 Init OK\r\n");
+
+      ov2640_status = OV2640_SetOutputSize(DCMI_FRAME_WIDTH,
+                                          DCMI_FRAME_HEIGHT);
+      if (ov2640_status != SCCB_STATUS_OK)
       {
-        printf("OV2640 Init Failed\r\n");
-        printf("OV2640 ERROR: ID verification failed (%u)\r\n",
+        printf("OV2640 ERROR: output size failed (%u)\r\n",
                (unsigned int)ov2640_status);
       }
       else
       {
-        printf("OV2640 PID: %02X\r\n", (unsigned int)ov2640_id.pid);
-        printf("OV2640 VER: %02X\r\n", (unsigned int)ov2640_id.ver);
-        printf("OV2640 Init OK\r\n");
-
-        ov2640_status = OV2640_SetOutputSize(DCMI_FRAME_WIDTH, DCMI_FRAME_HEIGHT);
-        if (ov2640_status != SCCB_STATUS_OK)
-        {
-          printf("OV2640 ERROR: output size failed (%u)\r\n",
-                 (unsigned int)ov2640_status);
-        }
-        else if (HAL_DCMI_Start_DMA(&hdcmi,
-                                    DCMI_MODE_SNAPSHOT,
-                                    (uint32_t)dcmi_frame_buffer,
-                                    DCMI_FRAME_WORD_COUNT) != HAL_OK)
-        {
-          printf("DCMI Start Failed\r\n");
-        }
+        camera_preview_ready = 1U;
       }
     }
   }
 
   /* FSMC初始化完成后再访问LCD。 */
   lcd_init();
+  lcd_display_dir(1U);
 
   /* LCD基础显示测试：文字、控制器ID和RGB色块。 */
   lcd_clear(WHITE);
@@ -178,6 +164,22 @@ int main(void)
   lcd_fill(20, 120, 70, 180, RED);
   lcd_fill(90, 120, 140, 180, GREEN);
   lcd_fill(160, 120, 210, 180, BLUE);
+
+  if (camera_preview_ready != 0U)
+  {
+    if (DCMI_ConfigureLcdDirectDma() != HAL_OK)
+    {
+      printf("DCMI DMA Config Failed\r\n");
+    }
+    else if (DCMI_StartRgb565Snapshot() == HAL_OK)
+    {
+      printf("RGB565 Preview Start\r\n");
+    }
+    else
+    {
+      printf("DCMI Start Failed\r\n");
+    }
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -191,8 +193,12 @@ int main(void)
     {
       dcmi_frame_ready = 0U;
       printf("DCMI Frame OK\r\n");
-      LCD_ShowCameraFrame();
       printf("LCD Frame Drawn\r\n");
+
+      if (DCMI_StartRgb565Snapshot() != HAL_OK)
+      {
+        printf("DCMI Restart Failed\r\n");
+      }
     }
 
     if (dcmi_error_pending != 0U)
@@ -326,21 +332,43 @@ static void LCD_Test_ShowId(uint16_t id)
 }
 
 /**
-  * @brief  将 QQVGA RGB565 帧缓冲居中写入 LCD
-  * @retval None
-  */
-static void LCD_ShowCameraFrame(void)
+ * @brief  将DCMI DMA配置为直接向LCD GRAM写入RGB565像素
+ * @retval HAL状态
+ */
+static HAL_StatusTypeDef DCMI_ConfigureLcdDirectDma(void)
 {
-  uint16_t start_x;
-  uint16_t start_y;
+  if ((hdcmi.State == HAL_DCMI_STATE_BUSY) ||
+      (hdma_dcmi.State == HAL_DMA_STATE_BUSY))
+  {
+    return HAL_BUSY;
+  }
 
-  start_x = (uint16_t)((lcddev.width - DCMI_FRAME_WIDTH) / 2U);
-  start_y = (uint16_t)((lcddev.height - DCMI_FRAME_HEIGHT) / 2U);
-  lcd_color_fill(start_x,
-                 start_y,
-                 (uint16_t)(start_x + DCMI_FRAME_WIDTH - 1U),
-                 (uint16_t)(start_y + DCMI_FRAME_HEIGHT - 1U),
-                 (uint16_t *)(void *)dcmi_frame_buffer);
+  hdma_dcmi.Init.MemInc = DMA_MINC_DISABLE;
+  hdma_dcmi.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+  hdma_dcmi.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
+  hdma_dcmi.Init.Mode = DMA_NORMAL;
+
+  return HAL_DMA_Init(&hdma_dcmi);
+}
+
+/**
+  * @brief  启动一次QVGA RGB565 Snapshot并由DMA直接写入LCD GRAM
+  * @retval HAL状态
+  */
+static HAL_StatusTypeDef DCMI_StartRgb565Snapshot(void)
+{
+  /* 每帧重新设置窗口和GRAM起点，避免LCD内部写指针跨帧漂移。 */
+  lcd_set_window(0U, 0U, DCMI_FRAME_WIDTH, DCMI_FRAME_HEIGHT);
+  lcd_write_ram_prepare();
+
+  __HAL_DCMI_CLEAR_FLAG(&hdcmi,
+                        DCMI_FLAG_FRAMERI | DCMI_FLAG_OVRRI |
+                        DCMI_FLAG_ERRRI);
+
+  return HAL_DCMI_Start_DMA(&hdcmi,
+                            DCMI_MODE_SNAPSHOT,
+                            (uint32_t)&LCD->LCD_RAM,
+                            DCMI_FRAME_WORD_COUNT);
 }
 /* USER CODE END 4 */
 

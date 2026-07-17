@@ -2,7 +2,8 @@
 CAD.formats=
 CAD.pinconfig=
 CAD.provider=
-DCMI.IPParameters=PCKPolarity
+DCMI.IPParameters=PCKPolarity,JPEGMode
+DCMI.JPEGMode=DCMI_JPEG_DISABLE
 DCMI.PCKPolarity=DCMI_PCKPOLARITY_RISING
 Dma.DCMI.0.Direction=DMA_PERIPH_TO_MEMORY
 Dma.DCMI.0.FIFOMode=DMA_FIFOMODE_ENABLE
