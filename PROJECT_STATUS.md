@@ -1,14 +1,14 @@
 # F4Camera 工程状态
 
-> 最后更新：2026-07-14  
+> 最后更新：2026-07-17
 > 工程平台：STM32F407ZGT6 + OV2640 Camera + 正点原子 2.8 寸 LCD  
-> 状态标记：✅ 已完成｜⚠️ 部分完成｜⏳ 未完成｜❌ 存在问题
+> 状态标记：✅ 已完成｜⚠️ 部分完成｜⏳ 未完成
 
 本文档用于记录当前仓库的真实工程状态，供后续开发和新的 AI 会话接手使用。配置存在、编译通过与硬件验证是三个不同层级，未进行实机验证的功能不得标记为硬件完成。
 
 ## 1. 项目当前阶段
 
-当前阶段：**OV2640 最小 SCCB 通信验证代码已完成并通过编译，等待硬件读取 PID/VER。**
+当前阶段：**Camera Frame Display on LCD（第六阶段）已完成软件和硬件闭环验证。**
 
 ### 已完成
 
@@ -21,14 +21,17 @@
 - ✅ 已完成：SCCB 通信模块迁移及 Keil 编译验证。
 - ✅ 已完成：OV2640 最小寄存器访问与 PID/VER 读取流程迁移。
 - ✅ 已完成：USART1 `printf` 调试输出接入及 Keil 编译验证。
+- ✅ 已完成：OV2640 软件复位、Sensor/DSP Bank 配置、UXGA 基础初始化表和 RGB565 输出格式迁移。
+- ✅ 已完成：OV2640 完整初始化流程的 Keil 编译验证。
+- ✅ 已完成：SCCB 初始化失败的软件修复：先执行 OV2640 硬件复位，再初始化 SCCB，并将 PD6/PD7 默认状态设为释放高电平；Keil 全量编译为 0 Error、0 Warning。
+- ✅ 已完成：实机读取 OV2640 PID `0x26`、VER `0x42`，串口输出 `OV2640 Init OK`。
+- ✅ 已完成：实现 160×120 RGB565、DCMI snapshot、DMA normal 到内部 SRAM 的最小单帧采集软件流程。
+- ✅ 已完成：实机串口输出 `DCMI Frame OK`，确认 DCMI/DMA 单帧完成链路正常。
+- ✅ 已完成：将 160×120 RGB565 帧缓冲通过现有 `lcd_color_fill()` 居中写入 LCD，Keil 全量编译通过。
+- ✅ 已完成：LCD 中央区域成功显示 OV2640 采集的 QQVGA RGB565 画面，串口输出 `LCD Frame Drawn`。
 
 ### 未完成
 
-- ⏳ 未完成：SCCB 硬件通信验证。
-- ⏳ 未完成：OV2640 PID/VER 实机读取验证。
-- ⏳ 未完成：OV2640 完整寄存器初始化。
-- ⏳ 未完成：DCMI 实际采集流程。
-- ⏳ 未完成：DMA 图像缓存设计与采集启动。
 - ⏳ 未完成：JPEG 数据处理。
 - ⏳ 未完成：USART 图像输出。
 
@@ -117,17 +120,19 @@ LCD 测试内容
 - ✅ 已完成：目标器件为 `STM32F407ZGTx`。
 - ✅ 已完成：使用 ArmClang V6.24（ARM Compiler 6）。
 - ✅ 已完成：当前构建结果为 0 Error、0 Warning。
+- ✅ 已完成：AXF 固件已生成。
+- ✅ 已完成：HEX 固件已生成。
 
 当前构建尺寸：
 
 | 类型 | 大小 |
 |---|---:|
-| Code | 28704 bytes |
-| RO-data | 18820 bytes |
+| Code | 31576 bytes |
+| RO-data | 19348 bytes |
 | RW-data | 16 bytes |
-| ZI-data | 2200 bytes |
-| Total ROM | 47540 bytes（46.43 KiB） |
-| Total RW | 2216 bytes（2.16 KiB） |
+| ZI-data | 40608 bytes |
+| Total ROM | 50940 bytes（49.75 KiB） |
+| Total RW | 40624 bytes（39.67 KiB） |
 
 ### SCCB 通信模块
 
@@ -142,11 +147,11 @@ LCD 测试内容
 
 #### 验证范围
 
-- 当前只完成软件迁移和编译验证。
-- 尚未在 OV2640 硬件上验证 SCCB ACK、寄存器读写和总线波形。
-- SCCB 层不包含 OV2640 器件逻辑；DCMI、DMA 和 CubeMX 生成的 GPIO 初始化未修改。
+- ✅ 已完成：SCCB ACK、PID/VER 寄存器读取和完整初始化写入流程已通过实机运行验证。
+- 实机串口已输出 PID `26`、VER `42` 和 `OV2640 Init OK`。
+- SCCB 层不包含 OV2640 器件逻辑；PD6/PD7 默认释放为高电平，PD7 保持开漏输出。
 
-### OV2640 最小通信验证模块
+### OV2640 驱动与完整初始化模块
 
 #### 软件实现
 
@@ -157,12 +162,99 @@ LCD 测试内容
 - ✅ 已完成：SCCB 初始化和每次寄存器访问均检查返回值；摄像头不存在时打印错误并继续进入主循环，不进入错误死循环。
 - ✅ 已完成：`printf` 重定向到 USART1，输出 PID、VER 或带状态码的错误信息。
 - ✅ 已完成：ArmClang V6.24 全量编译通过，结果为 0 Error、0 Warning。
+- ✅ 已完成：将硬件复位接口独立为 `OV2640_HardwareReset()`，由主流程在 `SCCB_Init()` 前调用；`OV2640_Init()` 不再重复硬件复位。
+- ✅ 已完成：软件复位通过 Sensor Bank 的 COM7（`0x12 = 0x80`）执行，并等待 50 ms。
+- ✅ 已完成：迁移正点原子实验24的 UXGA 基础初始化表，共 178 组 Sensor/DSP 寄存器配置。
+- ✅ 已完成：迁移 RGB565 输出格式表，共 14 组配置；当前只对外验证 RGB565 模式。
+- ✅ 已完成：每一项表写入均检查 SCCB 返回值，遇到首个 NACK 或超时立即停止并返回错误。
+- ✅ 已完成：主流程按 `OV2640_HardwareReset()` → `SCCB_Init()` → `OV2640_Init()` → PID/VER 复读顺序执行，并输出 `OV2640 Init OK` 或 `OV2640 Init Failed`。
 
 #### 验证范围
 
-- 当前只完成最小驱动、测试流程和编译验证，尚未连接硬件确认 PID/VER 返回值。
-- 本阶段没有导入完整 OV2640 初始化表，没有启动 DCMI/DMA，也没有实现 JPEG、LCD 图像显示或 USART 图像发送。
-- `Core/Src/gpio.c`、`Core/Src/dcmi.c`、`Core/Src/dma.c` 和 `F4Camera.ioc` 均未因本阶段修改。
+- ✅ 已完成：硬件复位、PID/VER 读取、UXGA 基础表和 RGB565 输出格式初始化已通过实机运行验证。
+- 本阶段未修改 SCCB、OV2640 寄存器初始化表、LCD 或 USART1 调试实现。
+
+### DCMI/DMA 最小单帧采集
+
+- OV2640 通过独立运行时接口将 DSP 输出设置为 QQVGA 160×120，RGB565 每帧为 38,400 字节。
+- 静态帧缓冲区类型为 `uint32_t[9600]`，链接地址为 `0x200000D4`，位于 DMA 可访问的内部 SRAM。
+- DCMI 保持硬件同步、8 bit、全帧、PCLK 上升沿、HSYNC/VSYNC 低有效和 `DCMI_JPEG_DISABLE`。
+- DMA 使用 DMA2 Stream1 / Channel 1、外设到内存、地址递增、外设和内存 32 位对齐、Normal 模式、Very High 优先级。
+- 使用 `HAL_DCMI_Start_DMA(..., DCMI_MODE_SNAPSHOT, ..., 9600)` 启动一次采集；帧回调只设置标志，主循环输出 `DCMI Frame OK`。
+- ✅ 已完成：实机串口输出 `DCMI Frame OK`，确认单帧完成中断和 DMA 传输流程正常。
+
+### LCD 单帧画面显示
+
+- 帧完成回调仍只设置标志，不在中断上下文中访问 FSMC 或打印串口。
+- 主循环检测到完整帧后，将 `uint32_t[9600]` 缓冲按 RGB565 16 位像素传给现有 `lcd_color_fill()`。
+- 160×120 画面根据 `lcddev.width`、`lcddev.height` 计算起点，并以原始尺寸居中显示，不做缩放。
+- 写屏完成后 USART1 输出 `LCD Frame Drawn`，用于确认程序已执行到 LCD GRAM 写入完成位置。
+- ✅ 已完成：LCD 实机成功显示 OV2640 采集的 RGB565 画面，第六阶段已完成软件和硬件闭环验证。
+
+#### 第六阶段代码修改记录
+
+修改文件：`Core/Src/main.c`
+
+- 收到完整 DCMI 帧后调用 `lcd_color_fill()`。
+- 将 160×120 RGB565 图像显示到 LCD 中央区域。
+- FSMC 写屏操作放在主循环中执行。
+- DCMI 帧中断只设置通知标志，不在中断中执行 LCD 刷新。
+- 增加 `LCD Frame Drawn` USART1 调试输出。
+
+该实现保持中断快速响应原则：DCMI 中断只负责通知主循环，完整帧的 LCD 刷新由主循环处理。
+
+#### 第六阶段硬件验证结果
+
+| 验证项 | 结果 |
+|---|---|
+| OV2640 PID | ✅ `0x26` |
+| OV2640 VER | ✅ `0x42` |
+| OV2640 初始化 | ✅ 成功 |
+| DCMI Snapshot | ✅ 实机验证成功 |
+| DMA Normal 单帧搬运 | ✅ 实机验证成功 |
+| FSMC/LCD 通信 | ✅ 正常 |
+| LCD 基础显示 | ✅ 正常 |
+| 摄像头 RGB565 画面显示 | ✅ 成功 |
+| USART1 调试输出 | ✅ 正常 |
+
+实机串口输出：
+
+```text
+OV2640 PID: 26
+OV2640 VER: 42
+OV2640 Init OK
+DCMI Frame OK
+LCD Frame Drawn
+```
+
+#### 第六阶段验证结论
+
+当前完整链路已经打通：
+
+```text
+OV2640
+↓
+SCCB 初始化
+↓
+DCMI 采集
+↓
+DMA 搬运
+↓
+RGB565 Frame Buffer
+↓
+FSMC LCD 显示
+```
+
+状态：✅ Camera image displayed on LCD successfully。
+
+#### 第六阶段保持未修改记录
+
+- SCCB 底层通信未修改。
+- OV2640 寄存器配置表未修改。
+- DCMI 基础配置未修改。
+- LCD 底层驱动未修改。
+- USART2 JPEG 发送未修改。
+- JPEG 模块未修改。
 
 ## 3. 当前工程结构
 
@@ -218,15 +310,15 @@ F4Camera/
 | 模块 | 状态 | 当前配置与验证范围 |
 |---|---|---|
 | RCC | ✅ 已完成 | HSE = 8 MHz，SYSCLK/HCLK = 168 MHz，APB1 = 42 MHz，APB2 = 84 MHz；已支持当前程序和 LCD 实机运行。 |
-| GPIO | ✅ 已完成 | 已生成 FSMC、LCD 背光、DCMI、SCCB 预留、OV2640 控制和 USART 引脚配置。摄像头相关引脚尚未进行通信验证。 |
+| GPIO | ✅ 已完成 | 已生成 FSMC、LCD 背光、DCMI、SCCB、OV2640 控制和 USART 引脚配置；SCCB、OV2640 控制、DCMI 数据与同步引脚均已通过完整图像链路实机验证。 |
 | FSMC | ✅ 已完成 | Bank1 NOR/SRAM4、16 bit、NE4/A6、Extended Mode；已完成 LCD 实机验证。 |
-| USART1 | ⚠️ 部分完成 | PA9/PA10，115200，TX/RX；已用于 OV2640 最小验证的 `printf` 调试输出，尚未进行实机串口验证。 |
+| USART1 | ✅ 已完成 | PA9/PA10，115200，TX/RX；已通过实机串口输出 PID、VER 和 OV2640 初始化状态。 |
 | USART2 | ⚠️ 部分完成 | PA2/PA3，921600，当前 HAL 模式为 TX；尚无图像协议和发送代码。 |
-| DCMI | ⚠️ 部分完成 | 硬件同步、8 bit、全帧、PCLK 上升沿，当前 `JPEGMode = DISABLE`；仅有 CubeMX 初始化代码。 |
-| DMA | ⚠️ 部分完成 | DCMI 使用 DMA2 Stream1 / Channel 1、循环模式、Very High 优先级；仅有 CubeMX 配置和 HAL 链接。 |
+| DCMI | ✅ 已完成 | 硬件同步、8 bit、全帧、PCLK 上升沿、HSYNC/VSYNC 低有效、`JPEGMode = DISABLE`；QQVGA snapshot 单帧及帧回调已通过实机验证。 |
+| DMA | ✅ 已完成 | DCMI 使用 DMA2 Stream1 / Channel 1、Normal 模式、32 位对齐、Very High 优先级；38,400 字节静态 SRAM 单帧传输已通过实机验证。 |
 | TIM6 | ⚠️ 部分完成 | 已生成约 1 Hz 的基础定时器配置，当前应用未启动使用。 |
 
-DCMI/DMA 目前只是 CubeMX 配置和生成代码存在。工程中没有 `HAL_DCMI_Start_DMA()`、图像缓冲区、帧完成处理或错误回调，因此尚未形成 OV2640 → DCMI → DMA → 内存的数据链路。
+DCMI/DMA 已形成 OV2640 → DCMI → DMA → 内部 SRAM 的最小采集链路，并通过 `DCMI Frame OK` 实机验证；帧缓冲数据也已通过 FSMC LCD 成功显示。
 
 ## 5. 硬件状态
 
@@ -243,13 +335,12 @@ DCMI/DMA 目前只是 CubeMX 配置和生成代码存在。工程中没有 `HAL_
 - ✅ 已完成：MCU 程序能够正常运行。
 - ✅ 已完成：FSMC NE4/A6 与 LCD 通信正常。
 - ✅ 已完成：LCD 初始化、ID 读取、字符显示和 RGB 色块显示正常。
+- ✅ 已完成：OV2640 SCCB 通信、硬件复位、PID `0x26`、VER `0x42` 和 RGB565 寄存器初始化正常。
+- ✅ 已完成：QQVGA 160×120 DCMI Snapshot 与 DMA Normal 单帧采集正常，串口输出 `DCMI Frame OK`。
+- ✅ 已完成：160×120 RGB565 摄像头画面已显示在 LCD 中央区域，串口输出 `LCD Frame Drawn`。
 
-### 未验证
+### 未完成
 
-- ⏳ 未完成：OV2640 SCCB 通信。
-- ⏳ 未完成：OV2640 ID 读取。
-- ⏳ 未完成：DCMI 图像采集。
-- ⏳ 未完成：DMA 图像缓存。
 - ⏳ 未完成：JPEG 输出。
 - ⏳ 未完成：USART 图像传输和 PC 端显示。
 
@@ -272,67 +363,72 @@ DCMI/DMA 目前只是 CubeMX 配置和生成代码存在。工程中没有 `HAL_
 |---|---|
 | 分支 | `main` |
 | 里程碑基线 commit | `e7f0351` |
-| 当前 HEAD | `0358ecf` |
+| 当前 HEAD | `d64234f` |
 | 版本标签 | `v1.0.0` |
 | Release | `STM32F407 OV2640 Camera Project v1.0.0` |
 | 里程碑状态 | ✅ 已完成 |
 
-`e7f0351` 是 LCD/FSMC 初始工程与 `v1.0.0` 发布对应的里程碑基线；`0358ecf` 是当前分支最新提交，在该基线之后更新了项目状态文档。两者用途不同：前者用于标识里程碑起点，后者表示当前实际检出的仓库版本。
+`e7f0351` 是 LCD/FSMC 初始工程与 `v1.0.0` 发布对应的里程碑基线；`d64234f` 是当前实际检出的提交，包含 SCCB、OV2640 PID/VER 最小验证和 USART1 调试输出。两者用途不同：前者用于标识 LCD/FSMC 里程碑起点，后者表示本阶段开始时的仓库版本。
 
 SCCB 阶段在 `BSP/SCCB/` 中新增独立通信模块，并将其接入 Keil 工程；CubeMX 配置和生成代码保持不变。
 
 OV2640 最小验证阶段新增 `BSP/OV2640/`，并在 `main.c` 的 USER CODE 区接入 USART1 输出；当前工作区改动尚未形成新的 Git 提交。
 
+OV2640 完整初始化阶段在现有 `BSP/OV2640/` 内扩展初始化表和错误返回；当前工作区改动尚未形成新的 Git 提交。
+
+SCCB 初始化失败修复阶段记录：实机曾输出 `OV2640 ERROR: SCCB init failed (3)`，其中状态码 3 为总线超时。将 PD6/PD7 默认输出状态改为高电平，并把硬件复位移动到 `SCCB_Init()` 之前后，实机已成功输出 PID `26`、VER `42` 和 `OV2640 Init OK`。
+
+第六阶段完成记录：收到完整 DCMI 帧后，由帧回调仅设置通知标志，主循环调用 `lcd_color_fill()` 将 QQVGA 160×120 RGB565 帧缓冲显示到 LCD 中央区域。实机已依次输出 `DCMI Frame OK` 和 `LCD Frame Drawn`，摄像头画面显示正常，完成软件和硬件闭环验证；该阶段工作区改动尚未形成新的 Git 提交。
+
 ## 7. 下一步计划
 
-### Step 1：SCCB 通信与 OV2640 ID 硬件验证（当前目标）
+### 第六阶段历史计划（✅ 已完成）
 
-目标：
+已完成：
 
-- 调用 `SCCB_Init()` 释放总线到空闲状态。
-- 确认 SCCB 空闲电平、应答和读写时序正常。
-- 通过硬件测试确认 SCCB 总线与摄像头连接可用。
-- 通过 SCCB 读取 OV2640 PID/VER 寄存器。
-- 确认串口输出为 PID `26`、VER `42`；异常时结合返回状态和总线波形定位问题。
+- 已使用当前固件确认串口依次输出 `DCMI Frame OK` 和 `LCD Frame Drawn`。
+- 已确认 LCD 中央 160×120 区域能够正常显示摄像头 RGB565 画面。
+- 实机画面未发现需要在本阶段处理的 RGB565 颜色异常。
 
-### Step 2：摄像头初始化
+### Phase 7：JPEG + USART2 Transmission（下一阶段）
 
-目标：
+目标链路：
 
-- 完成 OV2640 上电、PWDN、RESET 和寄存器初始化流程。
-- 完成摄像头基础格式与分辨率配置。
+```text
+OV2640
+↓
+DCMI JPEG Mode
+↓
+JPEG 数据缓存
+↓
+USART2 921600 bps
+↓
+PC XCAM 显示
+```
 
-### Step 3：验证 DCMI DMA 采集
-
-目标：
-
-- 设计 DMA 可访问的静态图像缓冲区。
-- 启动 DCMI DMA，并验证帧完成、错误处理和实际采集数据。
-
-### Step 4：实现 JPEG 数据处理
+#### 子目标 1：实现 JPEG 数据处理
 
 目标：
 
 - 确认 OV2640 JPEG 输出和 DCMI JPEG 模式。
 - 实现 JPEG 帧边界、有效长度和缓存溢出处理。
 
-### Step 5：实现 LCD 显示和 USART 输出
+#### 子目标 2：实现 USART2 图像输出
 
 目标：
 
-- 建立采集图像到 LCD 的显示路径。
-- 设计 USART 图像传输协议并完成 PC 端验证。
+- 使用 USART2 921600 bps 输出 JPEG 数据，并完成 PC XCAM 显示验证。
 - 根据吞吐量评估 USART2 DMA 发送。
 
 ## 8. 保留问题与设计记录
 
-- ❌ 存在问题：当前 DCMI 配置为 `DCMI_JPEG_DISABLE`，后续 JPEG 模式选择仍需结合 OV2640 输出格式确认。
+- ⏳ 未完成：当前 DCMI 配置为 `DCMI_JPEG_DISABLE`，第七阶段需要结合 OV2640 JPEG 输出切换并验证 DCMI JPEG 模式。
 - ⚠️ 部分完成：JPEG 缓存大小、帧最大长度、溢出处理和缓冲策略需要后续评估。
 - ⚠️ 部分完成：USART2 当前为 921600 baud、TX 模式，后续需要评估 DMA 发送和分包机制。
 - ✅ 已完成：OV2640 模块硬件时钟来源已经确认，当前模块自带晶振，不需要由 STM32 输出 XCLK。
-- ⚠️ 部分完成：DCMI DMA 当前使用循环模式和 Very High 优先级，实际采集后需要重新评估缓存策略和中断优先级。
-- ⚠️ 部分完成：DMA 图像缓冲区必须位于 DMA 可访问的 SRAM1/SRAM2，不能放入 Cortex-M4 CCM RAM。
-- ⏳ 未完成：DCMI 的 PCLK、HSYNC、VSYNC 极性仍需结合 OV2640 实际输出波形验证。
+- ✅ 已完成：DCMI DMA 当前使用 Normal 模式和 Very High 优先级，QQVGA RGB565 单帧采集与 LCD 显示已通过实机验证；后续连续采集策略和中断优先级留待新阶段评估。
+- ✅ 已完成：38,400 字节帧缓冲区位于 `0x200000D4`，属于 DMA 可访问的内部 SRAM，不使用 Cortex-M4 CCM RAM。
+- ✅ 已完成：当前 DCMI PCLK、HSYNC、VSYNC 极性已通过 OV2640 → DCMI → DMA → LCD 完整链路实机验证。
 
 ## 后续维护约束
 

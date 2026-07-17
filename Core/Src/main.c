@@ -40,6 +40,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define DCMI_FRAME_WIDTH       160U
+#define DCMI_FRAME_HEIGHT      120U
+#define DCMI_BYTES_PER_PIXEL   2U
+#define DCMI_FRAME_WORD_COUNT  ((DCMI_FRAME_WIDTH * DCMI_FRAME_HEIGHT * \
+                                 DCMI_BYTES_PER_PIXEL) / sizeof(uint32_t))
 
 /* USER CODE END PD */
 
@@ -53,12 +58,18 @@
 /* USER CODE BEGIN PV */
 static OV2640_ID_t ov2640_id;
 static SCCB_Status_t ov2640_status;
+static OV2640_Status_t ov2640_init_status;
+static uint32_t dcmi_frame_buffer[DCMI_FRAME_WORD_COUNT];
+static volatile uint8_t dcmi_frame_ready;
+static volatile uint8_t dcmi_error_pending;
+static volatile uint32_t dcmi_error_code;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 static void LCD_Test_ShowId(uint16_t id);
+static void LCD_ShowCameraFrame(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -106,27 +117,51 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  OV2640_HardwareReset();
   ov2640_status = SCCB_Init();
   if (ov2640_status != SCCB_STATUS_OK)
   {
+    printf("OV2640 Init Failed\r\n");
     printf("OV2640 ERROR: SCCB init failed (%u)\r\n", (unsigned int)ov2640_status);
   }
   else
   {
-    ov2640_status = OV2640_Read_ID(&ov2640_id);
-    if (ov2640_status != SCCB_STATUS_OK)
+    ov2640_init_status = OV2640_Init();
+    if (ov2640_init_status != OV2640_STATUS_OK)
     {
-      printf("OV2640 ERROR: SCCB read failed (%u)\r\n", (unsigned int)ov2640_status);
+      printf("OV2640 Init Failed\r\n");
+      printf("OV2640 ERROR: init status (%u)\r\n", (unsigned int)ov2640_init_status);
     }
     else
     {
-      printf("OV2640 PID: %02X\r\n", (unsigned int)ov2640_id.pid);
-      printf("OV2640 VER: %02X\r\n", (unsigned int)ov2640_id.ver);
-
-      if ((ov2640_id.pid != OV2640_PID_EXPECTED) ||
+      ov2640_status = OV2640_Read_ID(&ov2640_id);
+      if ((ov2640_status != SCCB_STATUS_OK) ||
+          (ov2640_id.pid != OV2640_PID_EXPECTED) ||
           (ov2640_id.ver != OV2640_VER_EXPECTED))
       {
-        printf("OV2640 ERROR: unexpected chip ID\r\n");
+        printf("OV2640 Init Failed\r\n");
+        printf("OV2640 ERROR: ID verification failed (%u)\r\n",
+               (unsigned int)ov2640_status);
+      }
+      else
+      {
+        printf("OV2640 PID: %02X\r\n", (unsigned int)ov2640_id.pid);
+        printf("OV2640 VER: %02X\r\n", (unsigned int)ov2640_id.ver);
+        printf("OV2640 Init OK\r\n");
+
+        ov2640_status = OV2640_SetOutputSize(DCMI_FRAME_WIDTH, DCMI_FRAME_HEIGHT);
+        if (ov2640_status != SCCB_STATUS_OK)
+        {
+          printf("OV2640 ERROR: output size failed (%u)\r\n",
+                 (unsigned int)ov2640_status);
+        }
+        else if (HAL_DCMI_Start_DMA(&hdcmi,
+                                    DCMI_MODE_SNAPSHOT,
+                                    (uint32_t)dcmi_frame_buffer,
+                                    DCMI_FRAME_WORD_COUNT) != HAL_OK)
+        {
+          printf("DCMI Start Failed\r\n");
+        }
       }
     }
   }
@@ -152,6 +187,19 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    if (dcmi_frame_ready != 0U)
+    {
+      dcmi_frame_ready = 0U;
+      printf("DCMI Frame OK\r\n");
+      LCD_ShowCameraFrame();
+      printf("LCD Frame Drawn\r\n");
+    }
+
+    if (dcmi_error_pending != 0U)
+    {
+      dcmi_error_pending = 0U;
+      printf("DCMI ERROR: 0x%08lX\r\n", (unsigned long)dcmi_error_code);
+    }
   }
   /* USER CODE END 3 */
 }
@@ -202,6 +250,23 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_DCMI_FrameEventCallback(DCMI_HandleTypeDef *dcmi_handle)
+{
+  if (dcmi_handle->Instance == DCMI)
+  {
+    dcmi_frame_ready = 1U;
+  }
+}
+
+void HAL_DCMI_ErrorCallback(DCMI_HandleTypeDef *dcmi_handle)
+{
+  if (dcmi_handle->Instance == DCMI)
+  {
+    dcmi_error_code = HAL_DCMI_GetError(dcmi_handle);
+    dcmi_error_pending = 1U;
+  }
+}
+
 #if defined(__ARMCC_VERSION) && (__ARMCC_VERSION >= 6010050)
 FILE __stdout;
 
@@ -258,6 +323,24 @@ static void LCD_Test_ShowId(uint16_t id)
   id_text[13] = hex_digits[id & 0x0FU];
 
   lcd_show_string(20, 80, 200, 24, 24, id_text, BLACK);
+}
+
+/**
+  * @brief  将 QQVGA RGB565 帧缓冲居中写入 LCD
+  * @retval None
+  */
+static void LCD_ShowCameraFrame(void)
+{
+  uint16_t start_x;
+  uint16_t start_y;
+
+  start_x = (uint16_t)((lcddev.width - DCMI_FRAME_WIDTH) / 2U);
+  start_y = (uint16_t)((lcddev.height - DCMI_FRAME_HEIGHT) / 2U);
+  lcd_color_fill(start_x,
+                 start_y,
+                 (uint16_t)(start_x + DCMI_FRAME_WIDTH - 1U),
+                 (uint16_t)(start_y + DCMI_FRAME_HEIGHT - 1U),
+                 (uint16_t *)(void *)dcmi_frame_buffer);
 }
 /* USER CODE END 4 */
 

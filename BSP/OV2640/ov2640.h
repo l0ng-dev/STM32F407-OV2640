@@ -1,7 +1,7 @@
 /**
  ******************************************************************************
  * @file    ov2640.h
- * @brief   OV2640 最小 SCCB 通信验证接口
+ * @brief   OV2640 SCCB 驱动与完整初始化接口
  ******************************************************************************
  */
 
@@ -28,6 +28,18 @@ typedef struct
 } OV2640_ID_t;
 
 /**
+ * @brief OV2640 初始化状态
+ */
+typedef enum
+{
+    OV2640_STATUS_OK = 0U,
+    OV2640_STATUS_SCCB_INVALID_PARAM,
+    OV2640_STATUS_SCCB_NACK,
+    OV2640_STATUS_SCCB_TIMEOUT,
+    OV2640_STATUS_ID_MISMATCH
+} OV2640_Status_t;
+
+/**
  * @brief  写入一个 OV2640 寄存器
  * @param  register_address 寄存器地址
  * @param  value            待写入数据
@@ -44,11 +56,30 @@ SCCB_Status_t OV2640_WriteReg(uint8_t register_address, uint8_t value);
 SCCB_Status_t OV2640_ReadReg(uint8_t register_address, uint8_t *value);
 
 /**
- * @brief  执行最小硬件复位并读取 PID、VER
+ * @brief  读取 Sensor Bank 中的 PID、VER
  * @param  id 芯片标识输出地址
  * @retval SCCB 操作状态
  */
 SCCB_Status_t OV2640_Read_ID(OV2640_ID_t *id);
+
+/**
+ * @brief  使用 CubeMX 已配置的控制引脚完成硬件复位时序
+ */
+void OV2640_HardwareReset(void);
+
+/**
+ * @brief  完成软件复位、芯片识别和 RGB565 初始化
+ * @retval OV2640 初始化状态
+ */
+OV2640_Status_t OV2640_Init(void);
+
+/**
+ * @brief  设置 DSP 输出分辨率
+ * @param  width  输出宽度，必须为 4 的倍数
+ * @param  height 输出高度，必须为 4 的倍数
+ * @retval SCCB 操作状态
+ */
+SCCB_Status_t OV2640_SetOutputSize(uint16_t width, uint16_t height);
 
 #ifdef __cplusplus
 }
