@@ -1,3 +1,26 @@
+/**
+ ******************************************************************************
+ * @file    camera.c
+ * @brief   DCMI/DMA 摄像头采集适配模块
+ *
+ * @details
+ * 主要功能：
+ * 1. 在 RGB565 LCD 与 JPEG SRAM 两种目标之间安全重配 DCMI/DMA。
+ * 2. 启动 Snapshot 采集并记录帧结束、DMA 计数和硬件错误。
+ * 3. 向上层提供非阻塞采集状态和有效字节数。
+ *
+ * 模块关系：
+ * Camera Application/JPEG 调用本模块；本模块复用 CubeMX 的 hdcmi 和 hdma_dcmi。
+ *
+ * 主要接口：
+ * Camera_ConfigureRGB565LcdDma()、Camera_ConfigureJpegDma()、
+ * Camera_StartRGB565Snapshot()、Camera_StartJPEGCapture()。
+ *
+ * @note
+ * 本模块不修改 DCMI GPIO、DMA Stream/Channel 或 CubeMX 静态配置来源。
+ ******************************************************************************
+ */
+
 #include "camera.h"
 
 #include "dma.h"
@@ -42,6 +65,11 @@ HAL_StatusTypeDef Camera_Stop(void)
     return status;
 }
 
+/**
+ * @brief  在停止状态下切换 DCMI JPEGMode
+ * @note   HAL_DCMI_Init() 会根据新的 JPEGMode 重建 DCMI 状态，因此必须先确认
+ *         DCMI 和 DMA 都不处于 BUSY，避免切换期间破坏正在进行的帧。
+ */
 HAL_StatusTypeDef Camera_SetDCMIJPEGMode(uint32_t jpeg_mode)
 {
     if ((jpeg_mode != DCMI_JPEG_DISABLE) &&
@@ -62,16 +90,23 @@ HAL_StatusTypeDef Camera_SetDCMIJPEGMode(uint32_t jpeg_mode)
 
 HAL_StatusTypeDef Camera_ConfigureRGB565LcdDma(void)
 {
+    /* LCD GRAM 是固定写端口：目标地址不递增，按 RGB565 半字宽度写入。 */
     return Camera_ConfigureDma(DMA_MINC_DISABLE,
                                DMA_MDATAALIGN_HALFWORD);
 }
 
 HAL_StatusTypeDef Camera_ConfigureJpegDma(void)
 {
+    /* JPEG 是连续字节流：目标地址必须递增，并以 Word 对齐写入 SRAM。 */
     return Camera_ConfigureDma(DMA_MINC_ENABLE,
                                DMA_MDATAALIGN_WORD);
 }
 
+/**
+ * @brief  启动一帧 RGB565 到 LCD GRAM 的 Snapshot
+ * @note   Snapshot 在一帧后自动结束；上层收到帧事件后重新设置 LCD 窗口，
+ *         再启动下一帧，从而保持 LCD 内部 GRAM 写指针与画面同步。
+ */
 HAL_StatusTypeDef Camera_StartRGB565Snapshot(uint32_t destination,
                                              uint32_t word_count)
 {
@@ -157,7 +192,7 @@ Camera_Error_t Camera_StartJPEGCapture(uint8_t *buffer, uint32_t buffer_size)
         return camera_error;
     }
 
-    /* 可变长JPEG不会填满整个DMA缓存，因此需要立即使能帧结束中断。 */
+    /* 可变长 JPEG 通常不会填满整个 DMA 缓存，因此需要立即使能帧结束中断。 */
     __HAL_DCMI_ENABLE_IT(&hdcmi, DCMI_IT_FRAME);
 
     return CAMERA_ERROR_NONE;
@@ -167,6 +202,10 @@ void Camera_Process(void)
 {
     HAL_StatusTypeDef stop_status;
 
+    /*
+     * JPEG 长度由帧结束时的 NDTR 推导；若 NDTR 先变为 0，说明缓存已写满，
+     * 应报告溢出而不是把不完整数据交给上层解析。
+     */
     if ((camera_state == CAMERA_CAPTURE_BUSY) &&
         (camera_frame_pending == 0U) &&
         (__HAL_DMA_GET_COUNTER(&hdma_dcmi) == 0U))
@@ -220,6 +259,10 @@ void Camera_NotifyFrameEvent(DCMI_HandleTypeDef *dcmi_handle)
 {
     uint32_t remaining_words;
 
+    /*
+     * 帧回调立即停用 DMA 并保存 NDTR 快照，防止可变长 JPEG 帧结束后继续写入。
+     * HAL_DCMI_Stop() 和错误打印仍由 Camera_Process() 在主循环完成。
+     */
     if ((dcmi_handle == &hdcmi) &&
         (camera_state == CAMERA_CAPTURE_BUSY))
     {
@@ -282,6 +325,10 @@ static HAL_StatusTypeDef Camera_ConfigureDma(uint32_t memory_increment,
         return HAL_BUSY;
     }
 
+    /*
+     * RGB565 与 JPEG 的目标递增和数据宽度不同，必须完整 DeInit/Init；
+     * 只改目标地址会遗留上一模式的 DMA 参数并造成花屏或缓存覆盖。
+     */
     if (HAL_DMA_DeInit(&hdma_dcmi) != HAL_OK)
     {
         return HAL_ERROR;

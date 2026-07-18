@@ -5,6 +5,20 @@
  * @version     V1.0
  * @date        2023-04-23
  * @brief       LCD驱动代码
+ *
+ * @details
+ * 主要功能：
+ * 1. 定义 FSMC LCD 地址映射、颜色、设备参数和公开接口。
+ * 2. 向 Camera Application 提供 LCD GRAM 地址及绘图能力。
+ *
+ * 模块关系：
+ * LCD BSP 依赖 CubeMX FSMC；Camera Application 使用本接口显示 RGB565 图像。
+ *
+ * 主要接口：
+ * lcd_init()、lcd_set_window()、lcd_clear()。
+ *
+ * @note
+ * 保留现有引脚定义、地址映射和控制器兼容逻辑。
  * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
  ****************************************************************************************************
  * @attention

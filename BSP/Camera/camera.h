@@ -1,3 +1,25 @@
+/**
+ ******************************************************************************
+ * @file    camera.h
+ * @brief   DCMI/DMA 摄像头采集接口
+ *
+ * @details
+ * 主要功能：
+ * 1. 定义底层采集状态和错误码。
+ * 2. 提供 RGB565 LCD 与 JPEG Buffer 的 DMA 配置和 Snapshot 接口。
+ * 3. 接收统一 DCMI 回调转发并提供采集结果查询。
+ *
+ * 模块关系：
+ * Camera Application 与 JPEG 模块调用本接口，底层使用 CubeMX HAL 句柄。
+ *
+ * 主要接口：
+ * Camera_Stop()、Camera_SetDCMIJPEGMode()、Camera_Process()。
+ *
+ * @note
+ * DEBUG_VERBOSE 仅控制诊断输出，不改变采集流程。
+ ******************************************************************************
+ */
+
 #ifndef BSP_CAMERA_H
 #define BSP_CAMERA_H
 

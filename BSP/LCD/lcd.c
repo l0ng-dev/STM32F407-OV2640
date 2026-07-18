@@ -5,6 +5,20 @@
  * @version     V1.0
  * @date        2023-04-23
  * @brief       LCD驱动代码
+ *
+ * @details
+ * 主要功能：
+ * 1. 通过 FSMC 访问 LCD 控制器寄存器和 GRAM。
+ * 2. 提供 LCD 初始化、窗口设置、填充、文字和图形绘制接口。
+ *
+ * 模块关系：
+ * Camera Application 调用 LCD BSP；RGB565 模式下 DCMI DMA 直接写 LCD GRAM。
+ *
+ * 主要接口：
+ * lcd_init()、lcd_set_window()、lcd_write_ram_prepare()。
+ *
+ * @note
+ * 本次仅补充工程说明，不修改正点原子 LCD 驱动逻辑和 FSMC 时序。
  * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
  ****************************************************************************************************
  * @attention

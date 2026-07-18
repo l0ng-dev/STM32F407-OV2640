@@ -1,3 +1,27 @@
+/**
+ ******************************************************************************
+ * @file    camera_app.c
+ * @brief   Camera 双模式应用管理模块
+ *
+ * @details
+ * 主要功能：
+ * 1. 管理 IDLE、RGB565 LCD 和 JPEG XCAM 三种运行状态。
+ * 2. 处理 WKUP/KEY0 按键事件及模式安全切换。
+ * 3. 协调 OV2640、DCMI/DMA、LCD、JPEG 解析和 USART2 发送。
+ *
+ * 模块关系：
+ * main.c 调用本模块；本模块调用 Camera BSP、OV2640、JPEG 和 LCD 模块。
+ * XCAM 没有独立源文件，其 USART2 JPEG 发送由本模块统一管理。
+ *
+ * 主要接口：
+ * CameraApp_Init()、CameraApp_Process()、CameraApp_NotifyFrameEvent()。
+ *
+ * @note
+ * 模式切换前先停止 DCMI/DMA，再切换传感器格式并重配 DMA；
+ * 不修改 CubeMX 底层外设和已验证的 LCD/FSMC 配置。
+ ******************************************************************************
+ */
+
 #include "camera_app.h"
 
 #include "camera.h"
@@ -29,6 +53,11 @@ typedef struct
     uint32_t candidate_tick;
 } CameraApp_KeyState_t;
 
+/*
+ * camera_mode 表示已经生效的硬件状态，camera_requested_mode 表示按键请求。
+ * 将“请求”与“当前状态”分开，可确保所有模式变化都经过统一的停止与重配流程，
+ * 避免在 DCMI/DMA 正忙时直接切换目标地址或传感器输出格式。
+ */
 static volatile Camera_Mode_t camera_mode = CAMERA_MODE_IDLE;
 static Camera_Mode_t camera_requested_mode = CAMERA_MODE_IDLE;
 static volatile uint8_t rgb_frame_pending;
@@ -89,6 +118,7 @@ void CameraApp_Init(void)
 
     Camera_Init();
     JPEG_Capture_Init();
+    /* 先完成硬件复位，再释放 SCCB 总线并写入 RGB565 基础配置。 */
     camera_sensor_ready = CameraApp_InitSensor();
     CameraApp_InitLcd();
 
@@ -102,6 +132,10 @@ void CameraApp_Process(void)
 {
     CameraApp_ScanKeys();
 
+    /*
+     * 只有请求模式与当前模式不一致时才执行切换。
+     * JPEG 正在发送时先完成当前分块，避免 USART2 输出半帧数据。
+     */
     if (camera_requested_mode != camera_mode)
     {
         if ((camera_mode == CAMERA_MODE_JPEG_XCAM) &&
@@ -146,6 +180,7 @@ void CameraApp_NotifyFrameEvent(DCMI_HandleTypeDef *dcmi_handle)
         return;
     }
 
+    /* 中断上下文只设置标志或转发事件，耗时处理统一留在主循环。 */
     if (camera_mode == CAMERA_MODE_RGB565_LCD)
     {
         rgb_frame_pending = 1U;
@@ -241,6 +276,7 @@ static void CameraApp_ScanKeys(void)
     key0_pressed =
         (HAL_GPIO_ReadPin(KEY0_GPIO_Port, KEY0_Pin) == GPIO_PIN_RESET) ? 1U : 0U;
 
+    /* 消抖完成后的按下沿只产生模式请求，不在按键处理处直接操作 DCMI。 */
     if (CameraApp_UpdateKey(&wkup_key, wkup_pressed, now) != 0U)
     {
         printf("[KEY] WKUP Press\r\n");
@@ -277,6 +313,10 @@ static uint8_t CameraApp_UpdateKey(CameraApp_KeyState_t *key,
 
 static void CameraApp_StopCurrentMode(void)
 {
+    /*
+     * 切换前清除上一个模式的帧标志和发送进度，再停止 DCMI/DMA。
+     * 这样新模式不会误用旧模式遗留的帧完成事件或 JPEG 长度。
+     */
     camera_mode = CAMERA_MODE_IDLE;
     rgb_frame_pending = 0U;
     dcmi_error_pending = 0U;
@@ -291,6 +331,10 @@ static uint8_t CameraApp_StartRgb565Mode(void)
     SCCB_Status_t sccb_status;
     OV2640_Status_t init_status;
 
+    /*
+     * RGB565 模式必须恢复 OV2640 RGB565 表、关闭 DCMI JPEG 位，
+     * 并把 DMA 目标配置为不递增的 LCD GRAM 半字写入。
+     */
     CameraApp_StopCurrentMode();
     printf("[CAM] Switch RGB565 LCD\r\n");
 
@@ -350,6 +394,10 @@ static uint8_t CameraApp_StartJpegMode(void)
     SCCB_Status_t sccb_status;
     JPEG_Error_t jpeg_status;
 
+    /*
+     * JPEG 模式需要可变长字节流连续写入 SRAM，因此开启 DCMI JPEG 位，
+     * DMA 使用 Word 对齐且目标地址递增；与 LCD 直写参数不能混用。
+     */
     CameraApp_StopCurrentMode();
     printf("[CAM] Switch JPEG XCAM\r\n");
 
@@ -447,6 +495,7 @@ static void CameraApp_ProcessJpeg(void)
     JPEG_CaptureState_t capture_state;
     JPEG_Error_t jpeg_status;
 
+    /* 主循环完成状态推进、SOI/EOI 解析和发送，回调中不做阻塞操作。 */
     JPEG_Capture_Process();
     capture_state = JPEG_Capture_GetState();
 
@@ -509,6 +558,11 @@ static uint8_t CameraApp_TransmitJpegChunk(void)
         return 1U;
     }
 
+    /*
+     * USART2 专门发送 JPEG 二进制数据，USART1 只承载文本调试日志，
+     * 避免 printf 字节混入 XCAM 图像流。分块发送限制单次阻塞时间，
+     * 同时保证一帧发送完成后才启动下一次采集。
+     */
     remaining = jpeg_tx_size - jpeg_tx_offset;
     chunk_size = (remaining > CAMERA_USART2_CHUNK_SIZE) ?
                  (uint16_t)CAMERA_USART2_CHUNK_SIZE :

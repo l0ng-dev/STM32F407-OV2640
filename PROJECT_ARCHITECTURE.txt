@@ -1,0 +1,140 @@
+F4Camera 工程架构说明
+=====================
+
+1. 项目简介
+-----------
+
+本工程是基于 STM32F407ZG、OV2640 摄像头和 FSMC LCD 的双模式摄像头系统。
+系统保留 320×240 RGB565 LCD 实时预览，同时支持 320×240 JPEG 采集并通过
+USART2 向 PC/XCAM 发送图像。
+
+
+2. 软件架构
+-----------
+
+Core 层
+
+负责：
+- CubeMX 生成的 HAL、时钟和外设初始化。
+- 调用 CameraApp_Init() 和 CameraApp_Process()。
+- 将 DCMI 帧事件与错误回调转发给 Camera Application。
+
+BSP 层
+
+负责：
+- BSP/LCD：LCD 控制器访问、FSMC GRAM 写入和绘图接口。
+- BSP/SCCB：OV2640 寄存器通信时序。
+- BSP/OV2640：传感器复位、RGB565/JPEG 输出格式和尺寸配置。
+- BSP/Camera：DCMI/DMA 模式切换、Snapshot 采集和硬件错误记录。
+
+Application 层
+
+负责：
+- Application/Camera：按键事件、Camera 状态机和模式切换。
+- Application/JPEG：64 KB JPEG 缓存、SOI/EOI 解析和有效帧管理。
+- XCAM 发送：当前没有独立 XCAM 源文件，由 Camera Application 使用 USART2
+  分块发送完整 JPEG；USART1 仅用于文本调试日志。
+
+
+3. 模块关系
+-----------
+
+OV2640
+   |
+   | SCCB
+   v
+OV2640 Driver
+   |
+   | DCMI + DMA
+   v
+Camera BSP
+   |
+   v
+Camera Application
+
+Camera Application：
+
+模式 1：
+RGB565
+   |
+   v
+LCD FSMC 显示
+
+模式 2：
+JPEG
+   |
+   v
+JPEG SOI/EOI 解析
+   |
+   v
+USART2
+   |
+   v
+XCAM
+
+
+4. 数据流程说明
+---------------
+
+RGB565：
+
+OV2640 -> DCMI -> DMA -> LCD GRAM
+
+RGB565 模式使用 DMA 目标地址不递增和 HalfWord 写入，使 DCMI 数据持续写入
+固定的 LCD GRAM 数据端口。每帧采用 Snapshot，帧结束后由主循环启动下一帧。
+
+JPEG：
+
+OV2640 -> DCMI JPEG -> DMA Buffer -> SOI/EOI 解析 -> USART2 -> XCAM
+
+JPEG 模式使用 DMA 目标地址递增和 Word 写入，将可变长字节流连续保存到 64 KB
+SRAM 缓存。帧结束时根据 DMA NDTR 计算接收长度，仅发送 SOI 到 EOI 的有效数据；
+当前帧发送完成后才启动下一帧采集。
+
+
+5. 按键与串口控制说明
+---------------------
+
+WKUP（PA0）：
+- 进入 CAMERA_MODE_RGB565_LCD。
+- 恢复 OV2640 RGB565 配置，关闭 DCMI JPEGMode。
+- DMA 直接写 LCD GRAM，启动 320×240 实时预览。
+
+KEY0（PE4）：
+- 进入 CAMERA_MODE_JPEG_XCAM。
+- 切换 OV2640 JPEG 输出，开启 DCMI JPEGMode。
+- DMA 写入 JPEG Buffer，完成解析后通过 USART2 发送到 XCAM。
+
+USART1：
+- 115200 baud，仅输出系统初始化、模式切换和错误调试信息。
+- DEBUG_VERBOSE=1 时额外输出逐帧和 JPEG Marker 信息。
+
+USART2：
+- 921600 baud，仅输出 JPEG 二进制数据。
+- 不承载 printf，避免文本日志破坏 XCAM 图像流。
+
+
+6. 模式切换原则
+---------------
+
+所有模式切换均遵循以下顺序：
+
+停止 DCMI/DMA
+-> 切换 OV2640 输出格式
+-> 配置 DCMI JPEGMode
+-> 完整重新初始化 DMA 参数
+-> 启动新的 Snapshot
+
+RGB565 与 JPEG 的 DMA 目标递增方式和数据宽度不同，因此不能只替换 DMA 目标
+地址。DCMI 回调只记录事件或转发标志，JPEG 解析、USART2 发送、LCD 帧重启和
+错误处理均在主循环完成。
+
+
+7. 维护边界
+-----------
+
+- CubeMX 管理底层 GPIO、时钟和外设静态配置。
+- BSP 负责硬件访问，Application 负责业务状态与数据流程。
+- 不在 DCMI 中断回调中执行 printf、USART 阻塞发送、SCCB 写寄存器或 LCD 操作。
+- 不修改已验证的 OV2640 RGB565 寄存器表、LCD/FSMC 时序和 SCCB 底层时序。
+- 中文注释和说明文件保持 UTF-8 编码。

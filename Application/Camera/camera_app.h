@@ -1,3 +1,24 @@
+/**
+ ******************************************************************************
+ * @file    camera_app.h
+ * @brief   Camera 双模式应用管理接口
+ *
+ * @details
+ * 主要功能：
+ * 1. 定义 Camera Application 运行模式。
+ * 2. 提供初始化、轮询处理和 DCMI 回调转发接口。
+ *
+ * 模块关系：
+ * Core 通过本接口驱动 Camera Application，具体硬件访问由 BSP 完成。
+ *
+ * 主要接口：
+ * CameraApp_Init()、CameraApp_Process()、CameraApp_GetMode()。
+ *
+ * @note
+ * 本接口只描述应用状态，不修改底层硬件配置。
+ ******************************************************************************
+ */
+
 #ifndef APPLICATION_CAMERA_APP_H
 #define APPLICATION_CAMERA_APP_H
 
@@ -7,6 +28,11 @@ extern "C" {
 
 #include "dcmi.h"
 
+/**
+ * @brief Camera Application 运行模式
+ * @note  IDLE 表示外设已初始化但未采集；另外两种状态对应独立的
+ *        OV2640、DCMI 和 DMA 运行参数，不能直接复用 DMA 目标地址。
+ */
 typedef enum
 {
     CAMERA_MODE_IDLE = 0U,

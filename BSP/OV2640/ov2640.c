@@ -1,7 +1,22 @@
 /**
  ******************************************************************************
  * @file    ov2640.c
- * @brief   OV2640 SCCB 驱动与完整初始化实现
+ * @brief   OV2640 SCCB 寄存器驱动与输出模式配置
+ *
+ * @details
+ * 主要功能：
+ * 1. 完成 OV2640 硬件复位、芯片识别和 RGB565 基础初始化。
+ * 2. 通过 SCCB 配置 JPEG 输出模式和 DSP 输出尺寸。
+ * 3. 顺序写入已验证的 Sensor/DSP 寄存器表并返回首个通信错误。
+ *
+ * 模块关系：
+ * Camera Application 调用本模块，本模块通过 SCCB BSP 访问 OV2640。
+ *
+ * 主要接口：
+ * OV2640_Init()、OV2640_SetJPEGMode()、OV2640_SetOutputSize()。
+ *
+ * @note
+ * 不在本模块重新配置 SCCB GPIO，也不修改已验证的寄存器表内容。
  ******************************************************************************
  */
 
@@ -150,6 +165,11 @@ OV2640_Status_t OV2640_Init(void)
     OV2640_ID_t id;
     SCCB_Status_t sccb_status;
 
+    /*
+     * 调用者先执行 OV2640_HardwareReset() 和 SCCB_Init()。
+     * 此处再做软件复位、PID/VER 校验，最后写入 UXGA 基础表和 RGB565 表，
+     * 保证每次从 JPEG 切回预览时都恢复同一组已验证配置。
+     */
     sccb_status = OV2640_WriteReg(OV2640_REG_BANK_SELECT, OV2640_BANK_SENSOR);
     if (sccb_status != SCCB_STATUS_OK)
     {
@@ -194,6 +214,7 @@ SCCB_Status_t OV2640_SetJPEGMode(void)
 {
     SCCB_Status_t status;
 
+    /* JPEG 编码依赖 YUV422 前置输出，必须先写 YUV422 表再启用 JPEG 表。 */
     status = OV2640_WriteTable(
         ov2640_yuv422_table,
         (uint16_t)(sizeof(ov2640_yuv422_table) / sizeof(ov2640_yuv422_table[0])));
@@ -215,6 +236,7 @@ SCCB_Status_t OV2640_SetOutputSize(uint16_t width, uint16_t height)
     uint16_t output_height;
     uint8_t output_size_high;
 
+    /* DSP 尺寸寄存器以 4 像素为单位，非 4 倍数无法无损表达。 */
     if ((width == 0U) || (height == 0U) ||
         ((width & 0x03U) != 0U) || ((height & 0x03U) != 0U))
     {

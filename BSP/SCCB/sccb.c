@@ -2,6 +2,20 @@
  ******************************************************************************
  * @file    sccb.c
  * @brief   基于 CubeMX GPIO 配置的 SCCB GPIO 模拟通信
+ *
+ * @details
+ * 主要功能：
+ * 1. 生成 SCCB 起始、停止、字节收发和 ACK/NACK 时序。
+ * 2. 提供带超时保护的单字节寄存器读写。
+ *
+ * 模块关系：
+ * OV2640 驱动调用本模块，本模块使用 main.h 中 CubeMX 生成的 GPIO 定义。
+ *
+ * 主要接口：
+ * SCCB_Init()、SCCB_WriteReg()、SCCB_ReadReg()。
+ *
+ * @note
+ * 只控制现有 GPIO 电平，不重新配置 SCCB 引脚模式。
  ******************************************************************************
  */
 
@@ -34,6 +48,10 @@ SCCB_Status_t SCCB_Init(void)
 {
     SCCB_Status_t status;
 
+    /*
+     * SCCB 空闲态要求 SCL/SDA 均释放为高电平；先确认总线可释放，
+     * 可在摄像头未连接或线路被拉低时尽早返回超时，而不是继续写寄存器。
+     */
     status = SCCB_SetSdaHigh();
     if (status != SCCB_STATUS_OK)
     {

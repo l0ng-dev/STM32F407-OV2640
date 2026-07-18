@@ -1,3 +1,25 @@
+/**
+ ******************************************************************************
+ * @file    jpeg.c
+ * @brief   JPEG 帧缓存与有效数据解析模块
+ *
+ * @details
+ * 主要功能：
+ * 1. 提供 DMA 可访问的 64 KB 静态 JPEG 缓存。
+ * 2. 协调 Camera BSP 完成单帧采集并解析 SOI/EOI 边界。
+ * 3. 在 DEBUG_VERBOSE 模式下统计 JPEG Marker 和输出缓存头。
+ *
+ * 模块关系：
+ * Camera Application 调用本模块，本模块调用 Camera BSP 完成 DCMI/DMA 采集。
+ *
+ * 主要接口：
+ * JPEG_Capture_Init()、JPEG_Capture_Start()、JPEG_Capture_Process()。
+ *
+ * @note
+ * 本模块只处理缓存和 JPEG 边界，不修改 DCMI/DMA 外设配置。
+ ******************************************************************************
+ */
+
 #include "jpeg.h"
 
 #include "camera.h"
@@ -16,7 +38,10 @@
 #define JPEG_DEBUG_DUMP_BYTES 32U
 #endif
 
-/* 静态缓存位于普通SRAM，由链接MAP确认地址；不放入0x10000000 CCM区域。 */
+/*
+ * DMA2 不能访问 0x10000000 CCM，因此 JPEG 缓存必须位于普通 SRAM。
+ * Word 数组和 4 字节对齐同时满足 DCMI DMA 的 Word 写入要求。
+ */
 static uint32_t jpeg_buffer[JPEG_BUFFER_WORDS] __attribute__((aligned(4)));
 static JPEG_CaptureState_t jpeg_capture_state = JPEG_CAPTURE_IDLE;
 static JPEG_Error_t jpeg_capture_error = JPEG_ERROR_NONE;
@@ -24,6 +49,7 @@ static uint32_t jpeg_frame_offset;
 static uint32_t jpeg_frame_size;
 
 #if (DEBUG_VERBOSE == 1)
+/* Marker 统计只用于判断 JPEG 结构是否完整，默认关闭以避免 USART1 刷屏。 */
 static void JPEG_PrintMarkerStatistic(uint32_t captured_size)
 {
     const uint8_t *data = (const uint8_t *)(const void *)jpeg_buffer;
@@ -112,6 +138,7 @@ static JPEG_Error_t JPEG_ParseFrame(uint32_t captured_size)
     JPEG_PrintMarkerStatistic(captured_size);
 #endif
 
+    /* 先定位首个 SOI，跳过 DCMI/DMA 起始处可能存在的无效填充字节。 */
     for (index = 0U; (index + 1U) < captured_size; ++index)
     {
         if ((data[index] == JPEG_SOI_FIRST_BYTE) &&
@@ -127,6 +154,7 @@ static JPEG_Error_t JPEG_ParseFrame(uint32_t captured_size)
         return JPEG_ERROR_SOI_NOT_FOUND;
     }
 
+    /* 从 SOI 之后查找首个 EOI，仅向 XCAM 暴露完整 JPEG 的有效范围。 */
     for (index = soi_offset + 2U; (index + 1U) < captured_size; ++index)
     {
         if ((data[index] == JPEG_EOI_FIRST_BYTE) &&
@@ -179,6 +207,7 @@ JPEG_Error_t JPEG_Capture_Start(void)
 {
     Camera_Error_t camera_status;
 
+    /* 每帧复用同一静态缓存；发送完成后才由 CameraApp 请求下一帧。 */
     JPEG_Buffer_Reset();
     jpeg_capture_error = JPEG_ERROR_NONE;
     jpeg_capture_state = JPEG_CAPTURE_BUSY;

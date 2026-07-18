@@ -1,3 +1,24 @@
+/**
+ ******************************************************************************
+ * @file    jpeg.h
+ * @brief   JPEG 帧缓存与采集状态接口
+ *
+ * @details
+ * 主要功能：
+ * 1. 定义 JPEG 缓存容量、采集状态和错误码。
+ * 2. 提供 JPEG 采集控制及有效数据访问接口。
+ *
+ * 模块关系：
+ * Camera Application 通过本接口获取已解析的 JPEG 地址和长度。
+ *
+ * 主要接口：
+ * JPEG_Capture_Start()、JPEG_Capture_GetData()、JPEG_Capture_GetSize()。
+ *
+ * @note
+ * 64 KB 缓存为静态分配，不使用动态内存。
+ ******************************************************************************
+ */
+
 #ifndef APPLICATION_JPEG_H
 #define APPLICATION_JPEG_H
 
