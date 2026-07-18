@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;..\BSP\LCD;..\BSP\SCCB;..\BSP\OV2640;..\BSP\Camera;..\Application\JPEG</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;..\BSP\LCD;..\BSP\SCCB;..\BSP\OV2640;..\BSP\Camera;..\Application\JPEG;..\Application\Camera</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -623,6 +623,16 @@
               <FileName>jpeg.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Application\JPEG\jpeg.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Application/Camera</GroupName>
+          <Files>
+            <File>
+              <FileName>camera_app.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Application\Camera\camera_app.c</FilePath>
             </File>
           </Files>
         </Group>

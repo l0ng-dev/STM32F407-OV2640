@@ -1,6 +1,6 @@
 # F4Camera 工程状态
 
-> 最后更新：2026-07-17
+> 最后更新：2026-07-18
 > 工程平台：STM32F407ZGT6 + OV2640 Camera + 正点原子 2.8 寸 LCD  
 > 状态标记：✅ 已完成｜⚠️ 部分完成｜⏳ 未完成
 
@@ -8,7 +8,43 @@
 
 ## 1. 项目当前阶段
 
-当前阶段：**320×240 RGB565 实时 LCD 全屏预览（Snapshot 循环采集，DMA 直接写 FSMC LCD GRAM）。**
+当前阶段：**v1.2.0 Camera 双模式功能开发完成并通过实机验证。**
+
+## v1.2.0
+
+发布日期：2026-07-18
+
+### 新增
+
+- ✅ RGB565 LCD 预览模式：OV2640 输出 320×240 RGB565，DCMI/DMA 直接写入 FSMC LCD GRAM。
+- ✅ JPEG XCAM 传输模式：OV2640 输出 320×240 JPEG，64 KB SRAM 缓存完成 SOI/EOI 解析，并通过 USART2 分块发送。
+- ✅ 按键模式切换：WKUP（PA0）进入 RGB565 LCD 模式，KEY0（PE4）进入 JPEG XCAM 模式，并提供 30 ms 软件消抖。
+- ✅ Camera Application 状态管理：新增 `Application/Camera/camera_app.c/.h`，集中管理 `IDLE`、`RGB565_LCD`、`JPEG_XCAM` 三种状态。
+- ✅ USART1 日志系统优化：统一模块化日志格式；`DEBUG_VERBOSE=0` 默认仅输出初始化、模式切换和错误，设为 `1` 时恢复逐帧调试信息。
+
+### 实现与验证
+
+- ✅ 保留 v1.1.0 的 320×240 RGB565 LCD 实时预览，并通过 WKUP 启动验证。
+- ✅ JPEG 帧完成后解析 SOI `FF D8` 和 EOI `FF D9`，USART2 按 1024 字节分块发送；发送完成前不启动下一帧。
+- ✅ KEY0 可进入 JPEG XCAM 模式，PC 端 XCAM 能够显示 JPEG 图像。
+- ✅ 模式切换按“停止 DCMI/DMA → 切换 OV2640 输出 → 配置 DCMI JPEG 位 → 完整重配 DMA → 启动 Snapshot”执行。
+- ✅ RGB565 与 JPEG 模式分别使用独立 DMA 参数，切换过程中未出现 DMA 冲突、HardFault、DCMI BUSY 或 LCD 花屏。
+- ✅ USART1 仅用于调试输出，USART2 专用于 JPEG 二进制数据传输。
+- ✅ `main.c` 只保留外设初始化、`CameraApp_Init()`、`CameraApp_Process()` 和 HAL 回调转发。
+
+### 验证平台
+
+- STM32F407ZGTx
+- OV2640
+- FSMC LCD
+- USART2 921600 baud
+- Keil ArmClang AC6
+
+### 编译
+
+- 0 Error
+- 0 Warning
+- Code=36976、RO-data=19800、RW-data=16、ZI-data=67816 bytes
 
 ### 已完成
 
@@ -83,7 +119,7 @@ LCD_RAM = 0x6C000080
 
 #### 初始化顺序
 
-当前 `main.c` 的关键调用顺序为：
+当前关键调用顺序为：
 
 ```text
 HAL_Init()
@@ -95,15 +131,17 @@ MX_FSMC_Init()
 MX_TIM6_Init()
 MX_USART1_UART_Init()
 MX_USART2_UART_Init()
-lcd_init()
-LCD 测试内容
+CameraApp_Init()
+  ├── OV2640/SCCB 初始化
+  └── lcd_init() 与 LCD 测试内容
+while (1): CameraApp_Process()
 ```
 
-`MX_FSMC_Init()` 在 `lcd_init()` 之前执行，满足 LCD 访问前必须先建立 FSMC 总线的要求。
+`MX_FSMC_Init()` 在 `CameraApp_Init()` 内部的 `lcd_init()` 之前执行，满足 LCD 访问前必须先建立 FSMC 总线的要求。
 
 #### 测试内容与结果
 
-当前 `main.c` 的 `USER CODE BEGIN 2` 区域包含：
+当前 LCD 测试内容由 `CameraApp_Init()` 调用，包含：
 
 - 白色清屏。
 - 显示 `LCD TEST`。
@@ -269,7 +307,17 @@ FSMC LCD 显示
 
 ```text
 F4Camera/
+├── Application/
+│   ├── Camera/
+│   │   ├── camera_app.c
+│   │   └── camera_app.h
+│   └── JPEG/
+│       ├── jpeg.c
+│       └── jpeg.h
 ├── BSP/
+│   ├── Camera/
+│   │   ├── camera.c
+│   │   └── camera.h
 │   ├── LCD/
 │   │   ├── lcd.c
 │   │   ├── lcd.h
@@ -310,7 +358,7 @@ F4Camera/
 - `MDK-ARM/`：Keil 工程、启动文件和本地构建输出。
 - `F4Camera.ioc`：CubeMX 外设、引脚和时钟配置源文件。
 
-当前不存在独立的 `Application/` 或 `BSP/JPEG/` 目录。
+Camera 模式管理位于 `Application/Camera/`，JPEG 缓存与解析位于 `Application/JPEG/`，DCMI/DMA 采集适配位于 `BSP/Camera/`。
 
 ## 4. CubeMX 配置状态
 
@@ -320,9 +368,9 @@ F4Camera/
 | GPIO | ✅ 已完成 | 已生成 FSMC、LCD 背光、DCMI、SCCB、OV2640 控制和 USART 引脚配置；SCCB、OV2640 控制、DCMI 数据与同步引脚均已通过 SCCB 通信或 DCMI/DMA 采集实机验证。 |
 | FSMC | ✅ 已完成 | Bank1 NOR/SRAM4、16 bit、NE4/A6、Extended Mode；已完成 LCD 实机验证。 |
 | USART1 | ✅ 已完成 | PA9/PA10，115200，TX/RX；已通过实机串口输出 PID、VER 和 OV2640 初始化状态。 |
-| USART2 | ⚠️ 部分完成 | PA2/PA3，921600，当前 HAL 模式为 TX；尚无图像协议和发送代码。 |
-| DCMI | ✅ 已完成 | 硬件同步、8 bit、全帧、PCLK 上升沿、HSYNC/VSYNC 低有效、`JPEGMode = DISABLE`；QQVGA snapshot 单帧及帧回调已通过实机验证。 |
-| DMA | ✅ 已完成 | DCMI 使用 DMA2 Stream1 / Channel 1、Normal 模式、32 位对齐、Very High 优先级；38,400 字节静态 SRAM 单帧传输已通过实机验证。 |
+| USART2 | ✅ 已完成 | PA2/PA3，921600，HAL TX；有效 JPEG 原始字节流分块发送和 XCAM 显示已通过实机验证。 |
+| DCMI | ✅ 已完成 | 硬件同步、8 bit、全帧、PCLK 上升沿、HSYNC/VSYNC 低有效；运行时按 RGB565/JPEG 模式切换 JPEGMode，双模式均已通过实机验证。 |
+| DMA | ✅ 已完成 | DCMI 使用 DMA2 Stream1 / Channel 1、Normal 模式、Very High 优先级；RGB565 使用目标 HalfWord/不递增，JPEG 使用目标 Word/递增。 |
 | TIM6 | ⚠️ 部分完成 | 已生成约 1 Hz 的基础定时器配置，当前应用未启动使用。 |
 
 DCMI/DMA 已形成 OV2640 → DCMI → DMA → 内部 SRAM → FSMC LCD 的采集显示链路，并已通过RGB565单帧画面实机验证。
@@ -345,17 +393,19 @@ DCMI/DMA 已形成 OV2640 → DCMI → DMA → 内部 SRAM → FSMC LCD 的采�
 - ✅ 已完成：OV2640 SCCB 通信、硬件复位、PID `0x26`、VER `0x42` 和 RGB565 寄存器初始化正常。
 - ✅ 已完成：QQVGA 160×120 DCMI Snapshot 与 DMA Normal 单帧采集正常，串口输出 `DCMI Frame OK`。
 - ✅ 已完成：320×240 RGB565、DCMI Snapshot、DMA Normal 直接写 FSMC LCD GRAM 的全屏实时预览正常。
+- ✅ 已完成：320×240 JPEG 采集、SOI/EOI 解析、USART2 921600 分块发送正常。
+- ✅ 已完成：PC/XCAM 能够接收并显示 JPEG 图像。
+- ✅ 已完成：WKUP/KEY0 可分别进入 RGB565 LCD 与 JPEG XCAM 模式。
 
 ### 未完成
 
-- ⏳ 未完成：JPEG 输出。
-- ⏳ 未完成：USART 图像传输和 PC 端显示。
+- ⏳ 未完成：实际帧率和长时间连续运行稳定性的量化记录。
 
 ## 6. 当前 Git 里程碑
 
 ### Milestone
 
-**320×240 RGB565 实时 LCD 全屏预览完成并通过硬件验证**
+**v1.2.0 RGB565 LCD + JPEG XCAM 双模式完成并通过硬件验证**
 
 完成内容：
 
@@ -363,19 +413,21 @@ DCMI/DMA 已形成 OV2640 → DCMI → DMA → 内部 SRAM → FSMC LCD 的采�
 - FSMC Bank1 NOR/SRAM4、NE4/A6 和 16 位数据总线配置完成。
 - LCD BSP 加入 Keil 工程并通过 Arm Compiler 6 构建。
 - 完成第一次 LCD/FSMC 硬件验证。
+- Camera Application 状态机、JPEG 采集和 USART2 XCAM 传输完成。
+- WKUP/KEY0 双模式切换及 USART1 日志控制完成。
 
 当前 Git 状态：
 
 | 项目 | 当前值 |
 |---|---|
 | 分支 | `main` |
-| 里程碑基线 commit | `e7f0351` |
-| 发布提交 | 由 `v1.1.0` 标签指向本次发布提交 |
-| 版本标签 | `v1.0.0`（保留）、`v1.1.0`（当前版本） |
-| Release | `STM32F407 OV2640 RGB565 Camera Preview v1.1.0` |
+| 里程碑基线 commit | `af97209`（v1.1.0） |
+| 发布提交 | 由 `v1.2.0` 标签指向本次发布提交 |
+| 版本标签 | `v1.0.0`、`v1.1.0`（保留）、`v1.2.0`（当前版本） |
+| Release | `v1.2.0 Camera Dual Mode Release` |
 | 里程碑状态 | ✅ 已完成 |
 
-`e7f0351` 是 LCD/FSMC 初始工程与 `v1.0.0` 发布对应的里程碑基线；`d64234f` 是当前实际检出的提交，包含 SCCB、OV2640 PID/VER 最小验证和 USART1 调试输出。两者用途不同：前者用于标识 LCD/FSMC 里程碑起点，后者表示本阶段开始时的仓库版本。
+`af97209` 是 v1.1.0 RGB565 LCD 实时预览发布基线；v1.2.0 在该基线上增加 JPEG XCAM 传输、按键模式切换、Camera Application 状态管理和 USART1 日志控制。
 
 SCCB 阶段在 `BSP/SCCB/` 中新增独立通信模块，并将其接入 Keil 工程；CubeMX 配置和生成代码保持不变。
 
@@ -425,10 +477,10 @@ FSMC LCD GRAM
 
 ## 8. 保留问题与设计记录
 
-- ✅ 已完成：项目路线调整为 RGB565 实时 LCD 预览；JPEG + USART2 + XCAM 路线已停止，不再作为下一阶段目标。
-- 历史记录：DCMI曾配置为 `DCMI_JPEG_ENABLE` 并通过编译；当前路线已经恢复为 `DCMI_JPEG_DISABLE`。
-- ⚠️ 部分完成：已实现64KB JPEG缓存、DMA实际长度计算、SOI/EOI解析及溢出保护；软件编译通过，硬件采集结果待验证。
-- ⚠️ 部分完成：USART2 当前为 921600 baud、TX 模式，后续需要评估 DMA 发送和分包机制。
+- 历史记录：v1.1.0 曾暂停 JPEG 路线；v1.2.0 已恢复 JPEG + USART2 + XCAM，并以双模式保留 RGB565 实时预览。
+- CubeMX 默认配置保持 `DCMI_JPEG_DISABLE`；CameraApp 在运行时按 RGB565/JPEG 模式动态切换 DCMI JPEGMode。
+- ✅ 已完成：64 KB JPEG 缓存、DMA 实际长度计算、SOI/EOI 解析及溢出保护已通过实机采集验证。
+- ✅ 已完成：USART2 当前为 921600 baud、TX 模式，采用阻塞式 1024 字节分块发送，已通过 XCAM 显示验证；本版本不引入 USART2 DMA。
 - ✅ 已完成：OV2640 模块硬件时钟来源已经确认，当前模块自带晶振，不需要由 STM32 输出 XCLK。
 - ✅ 已完成：DCMI DMA 当前使用 Normal 模式和 Very High 优先级，320×240 RGB565 Snapshot 循环采集与 LCD 全屏显示已通过实机验证。
 - 历史记录：160×120 阶段使用 38,400 字节内部 SRAM 帧缓冲；当前 320×240 路线由 DMA 直接写 LCD GRAM，不再占用该帧缓冲。
@@ -443,32 +495,31 @@ FSMC LCD GRAM
 - 不得把“配置存在”或“编译通过”写成“硬件验证成功”。
 - 所有新增中文内容使用 UTF-8 编码保存。
 
-## 9. JPEG采集模块阶段（软件实现完成，待硬件验证）
+## 9. JPEG采集模块阶段（已完成并通过硬件验证）
 
-> 历史记录：该路线已停止。相关源码暂时保留，但当前主程序不再调用，64KB JPEG缓存未链接进现行固件。
+> 历史记录：该路线在 v1.1.0 曾暂停；v1.2.0 已重新接入 CameraApp，64 KB JPEG 缓存已链接进当前固件。
 
 - ✅ 已完成：新增 `BSP/Camera`，复用CubeMX生成的 `hdcmi`、`hdma_dcmi`，使用Snapshot、DMA Normal和Word传输启动采集。
 - ✅ 已完成：新增 `Application/JPEG`，提供64KB、4字节对齐的静态缓存及SOI `FF D8`、EOI `FF D9`解析。
 - ✅ 已完成：通过DMA NDTR计算原始接收字节数，并实现缓存溢出、DCMI错误、DMA错误、无SOI和无EOI错误码。
-- ✅ 已完成：Keil ArmClang AC6全量编译为0 Error、0 Warning；MAP确认缓存位于 `0x200002B4` 的普通SRAM1，不在CCM。
-- ⚠️ 部分完成：当前软件已具备输出 `JPEG Frame OK` 和JPEG有效长度的能力，尚未完成实机采集验证。
-- ⏳ 未完成：USART2 JPEG发送和PC端XCAM显示。
+- ✅ 已完成：Keil ArmClang AC6全量编译为0 Error、0 Warning；MAP确认缓存位于 `0x200002E0` 的普通SRAM1，不在CCM。
+- ✅ 已完成：320×240 JPEG 实机采集、有效长度解析和错误检测验证。
+- ✅ 已完成：USART2 有效 JPEG 原始字节流分块发送的软件实现。
+- ✅ 已完成：PC 端 XCAM 实际显示验证。
 
 当前阶段数据链路：
 
 ```text
-OV2640 JPEG → DCMI JPEG → DMA2 Stream1/Channel1 → 64KB SRAM Buffer → SOI/EOI解析
+OV2640 JPEG → DCMI JPEG → DMA2 Stream1/Channel1 → 64 KB SRAM Buffer → SOI/EOI 解析 → USART2 → XCAM
 ```
-
-详细设计与编译记录见 `Docs/JPEG采集模块实现报告.md`。
 
 ## 10. RGB565实时LCD预览阶段
 
-- ✅ 已完成：OV2640启动流程只执行已验证的 `OV2640_Init()` RGB565配置，不再调用JPEG模式切换。
-- ✅ 已完成：`F4Camera.ioc` 与 `Core/Src/dcmi.c` 均恢复为 `DCMI_JPEG_DISABLE`。
+- ✅ 已完成：RGB565 模式执行已验证的 `OV2640_Init()`；切换 JPEG 模式时调用 `OV2640_SetJPEGMode()`，切回 RGB565 时恢复原配置。
+- ✅ 已完成：`F4Camera.ioc` 与 `Core/Src/dcmi.c` 保持默认 `DCMI_JPEG_DISABLE`，运行时由 CameraApp 按模式切换。
 - ✅ 已完成：保持DMA2 Stream1 / Channel 1、Normal模式，运行时配置为外设 Word、目标 HalfWord和目标地址不递增。
 - ✅ 已完成：首次Snapshot在LCD初始化完成后启动，避免LCD初始化阶段与采集流程交叠。
-- ✅ 已完成：每次帧回调只设置 `dcmi_frame_ready`，不在中断中执行FSMC写屏或串口打印。
+- ✅ 已完成：统一 DCMI 帧回调只向 CameraApp 转发事件，不在中断中执行 FSMC 写屏或串口打印。
 - ✅ 已完成：DMA直接写FSMC LCD GRAM，主循环收到完整帧通知后启动下一次Snapshot。
 - ✅ 已完成：LCD初始化完成后按控制器ID将FSMC写时序从9/9动态优化到3/3。
 - ✅ 已完成：Keil ArmClang AC6全量编译为0 Error、0 Warning；Code=32444、RO-data=19340、RW-data=16、ZI-data=2208 bytes。

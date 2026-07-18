@@ -15,6 +15,9 @@ static volatile uint32_t camera_frame_dcmi_error;
 static volatile uint32_t camera_frame_dma_error;
 static uint32_t camera_buffer_word_count;
 
+static HAL_StatusTypeDef Camera_ConfigureDma(uint32_t memory_increment,
+                                             uint32_t memory_alignment);
+
 void Camera_Init(void)
 {
     camera_state = CAMERA_CAPTURE_IDLE;
@@ -26,6 +29,74 @@ void Camera_Init(void)
     camera_frame_dcmi_error = HAL_DCMI_ERROR_NONE;
     camera_frame_dma_error = HAL_DMA_ERROR_NONE;
     camera_buffer_word_count = 0U;
+}
+
+HAL_StatusTypeDef Camera_Stop(void)
+{
+    HAL_StatusTypeDef status;
+
+    __HAL_DCMI_DISABLE_IT(&hdcmi, DCMI_IT_FRAME);
+    status = HAL_DCMI_Stop(&hdcmi);
+    Camera_Init();
+
+    return status;
+}
+
+HAL_StatusTypeDef Camera_SetDCMIJPEGMode(uint32_t jpeg_mode)
+{
+    if ((jpeg_mode != DCMI_JPEG_DISABLE) &&
+        (jpeg_mode != DCMI_JPEG_ENABLE))
+    {
+        return HAL_ERROR;
+    }
+
+    if ((hdcmi.State == HAL_DCMI_STATE_BUSY) ||
+        (hdma_dcmi.State == HAL_DMA_STATE_BUSY))
+    {
+        return HAL_BUSY;
+    }
+
+    hdcmi.Init.JPEGMode = jpeg_mode;
+    return HAL_DCMI_Init(&hdcmi);
+}
+
+HAL_StatusTypeDef Camera_ConfigureRGB565LcdDma(void)
+{
+    return Camera_ConfigureDma(DMA_MINC_DISABLE,
+                               DMA_MDATAALIGN_HALFWORD);
+}
+
+HAL_StatusTypeDef Camera_ConfigureJpegDma(void)
+{
+    return Camera_ConfigureDma(DMA_MINC_ENABLE,
+                               DMA_MDATAALIGN_WORD);
+}
+
+HAL_StatusTypeDef Camera_StartRGB565Snapshot(uint32_t destination,
+                                             uint32_t word_count)
+{
+    if ((destination == 0U) || (word_count == 0U))
+    {
+        return HAL_ERROR;
+    }
+
+    if ((hdcmi.Init.JPEGMode != DCMI_JPEG_DISABLE) ||
+        (hdma_dcmi.Init.Mode != DMA_NORMAL) ||
+        (hdma_dcmi.Init.PeriphDataAlignment != DMA_PDATAALIGN_WORD) ||
+        (hdma_dcmi.Init.MemDataAlignment != DMA_MDATAALIGN_HALFWORD) ||
+        (hdma_dcmi.Init.MemInc != DMA_MINC_DISABLE))
+    {
+        return HAL_ERROR;
+    }
+
+    __HAL_DCMI_CLEAR_FLAG(&hdcmi,
+                          DCMI_FLAG_FRAMERI | DCMI_FLAG_OVRRI |
+                          DCMI_FLAG_ERRRI);
+
+    return HAL_DCMI_Start_DMA(&hdcmi,
+                              DCMI_MODE_SNAPSHOT,
+                              destination,
+                              word_count);
 }
 
 Camera_Error_t Camera_StartJPEGCapture(uint8_t *buffer, uint32_t buffer_size)
@@ -116,15 +187,17 @@ void Camera_Process(void)
     {
         camera_frame_pending = 0U;
         stop_status = HAL_DCMI_Stop(&hdcmi);
-        printf("DCMI Frame Event\r\n");
-        printf("DMA NDTR:\r\n%lu\r\n",
+#if (DEBUG_VERBOSE == 1)
+        printf("[DCMI] Frame Event\r\n");
+        printf("[DMA] NDTR: %lu\r\n",
                (unsigned long)camera_frame_dma_ndtr);
-        printf("Captured Size:\r\n%lu bytes\r\n",
+        printf("[DMA] Captured: %lu Bytes\r\n",
                (unsigned long)camera_captured_size);
-        printf("DCMI Error:\r\n0x%08lX\r\n",
+        printf("[DCMI] Error: 0x%08lX\r\n",
                (unsigned long)camera_frame_dcmi_error);
-        printf("DMA Error:\r\n0x%08lX\r\n",
+        printf("[DMA] Error: 0x%08lX\r\n",
                (unsigned long)camera_frame_dma_error);
+#endif
         if (stop_status != HAL_OK)
         {
             camera_error = CAMERA_ERROR_STOP;
@@ -198,4 +271,35 @@ Camera_Error_t Camera_GetError(void)
 uint32_t Camera_GetCapturedSize(void)
 {
     return camera_captured_size;
+}
+
+static HAL_StatusTypeDef Camera_ConfigureDma(uint32_t memory_increment,
+                                             uint32_t memory_alignment)
+{
+    if ((hdcmi.State == HAL_DCMI_STATE_BUSY) ||
+        (hdma_dcmi.State == HAL_DMA_STATE_BUSY))
+    {
+        return HAL_BUSY;
+    }
+
+    if (HAL_DMA_DeInit(&hdma_dcmi) != HAL_OK)
+    {
+        return HAL_ERROR;
+    }
+
+    hdma_dcmi.Instance = DMA2_Stream1;
+    hdma_dcmi.Init.Channel = DMA_CHANNEL_1;
+    hdma_dcmi.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    hdma_dcmi.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_dcmi.Init.MemInc = memory_increment;
+    hdma_dcmi.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    hdma_dcmi.Init.MemDataAlignment = memory_alignment;
+    hdma_dcmi.Init.Mode = DMA_NORMAL;
+    hdma_dcmi.Init.Priority = DMA_PRIORITY_VERY_HIGH;
+    hdma_dcmi.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
+    hdma_dcmi.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_HALFFULL;
+    hdma_dcmi.Init.MemBurst = DMA_MBURST_SINGLE;
+    hdma_dcmi.Init.PeriphBurst = DMA_PBURST_SINGLE;
+
+    return HAL_DMA_Init(&hdma_dcmi);
 }

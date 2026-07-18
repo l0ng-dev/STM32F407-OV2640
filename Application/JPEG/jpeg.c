@@ -12,7 +12,9 @@
 #define JPEG_SOF_SECOND_BYTE  0xC0U
 #define JPEG_DHT_SECOND_BYTE  0xC4U
 #define JPEG_BUFFER_WORDS     (JPEG_BUFFER_SIZE_BYTES / sizeof(uint32_t))
+#if (DEBUG_VERBOSE == 1)
 #define JPEG_DEBUG_DUMP_BYTES 32U
+#endif
 
 /* 静态缓存位于普通SRAM，由链接MAP确认地址；不放入0x10000000 CCM区域。 */
 static uint32_t jpeg_buffer[JPEG_BUFFER_WORDS] __attribute__((aligned(4)));
@@ -21,6 +23,7 @@ static JPEG_Error_t jpeg_capture_error = JPEG_ERROR_NONE;
 static uint32_t jpeg_frame_offset;
 static uint32_t jpeg_frame_size;
 
+#if (DEBUG_VERBOSE == 1)
 static void JPEG_PrintMarkerStatistic(uint32_t captured_size)
 {
     const uint8_t *data = (const uint8_t *)(const void *)jpeg_buffer;
@@ -70,13 +73,14 @@ static void JPEG_PrintMarkerStatistic(uint32_t captured_size)
         }
     }
 
-    printf("JPEG Marker Statistic:\r\n");
-    printf("SOI: %lu\r\n", (unsigned long)soi_count);
-    printf("EOI: %lu\r\n", (unsigned long)eoi_count);
-    printf("SOS: %lu\r\n", (unsigned long)sos_count);
-    printf("DQT: %lu\r\n", (unsigned long)dqt_count);
-    printf("SOF: %lu\r\n", (unsigned long)sof_count);
-    printf("DHT: %lu\r\n", (unsigned long)dht_count);
+    printf("[JPEG] Marker:\r\n");
+    printf("SOI=%lu EOI=%lu SOS=%lu DQT=%lu SOF=%lu DHT=%lu\r\n",
+           (unsigned long)soi_count,
+           (unsigned long)eoi_count,
+           (unsigned long)sos_count,
+           (unsigned long)dqt_count,
+           (unsigned long)sof_count,
+           (unsigned long)dht_count);
 }
 
 static void JPEG_PrintBufferHead(void)
@@ -84,13 +88,14 @@ static void JPEG_PrintBufferHead(void)
     const uint8_t *data = (const uint8_t *)(const void *)jpeg_buffer;
     uint32_t index;
 
-    printf("JPEG Buffer:\r\n");
+    printf("[JPEG] Buffer Head: ");
     for (index = 0U; index < JPEG_DEBUG_DUMP_BYTES; ++index)
     {
         printf("%02X", (unsigned int)data[index]);
         printf("%s", (index + 1U < JPEG_DEBUG_DUMP_BYTES) ? " " : "\r\n");
     }
 }
+#endif
 
 static JPEG_Error_t JPEG_ParseFrame(uint32_t captured_size)
 {
@@ -103,7 +108,9 @@ static JPEG_Error_t JPEG_ParseFrame(uint32_t captured_size)
         captured_size = JPEG_BUFFER_SIZE_BYTES;
     }
 
+#if (DEBUG_VERBOSE == 1)
     JPEG_PrintMarkerStatistic(captured_size);
+#endif
 
     for (index = 0U; (index + 1U) < captured_size; ++index)
     {
@@ -216,7 +223,9 @@ void JPEG_Capture_Process(void)
         }
         else
         {
+#if (DEBUG_VERBOSE == 1)
             JPEG_PrintBufferHead();
+#endif
             jpeg_capture_state = JPEG_CAPTURE_ERROR;
         }
     }
