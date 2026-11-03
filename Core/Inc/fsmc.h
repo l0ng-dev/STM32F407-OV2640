@@ -31,6 +31,7 @@
 
 /* USER CODE END Includes */
 
+extern SRAM_HandleTypeDef hsram3;
 extern SRAM_HandleTypeDef hsram4;
 
 /* USER CODE BEGIN Private defines */

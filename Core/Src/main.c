@@ -44,6 +44,8 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include "camera_app.h"
+#include "sram_test.h"
+#include "vofa.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -113,9 +115,9 @@ int main(void)
   MX_DCMI_Init();
   MX_FSMC_Init();
   MX_TIM6_Init();
-  MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  SRAM_Test();
   CameraApp_Init();
   /* USER CODE END 2 */
 
@@ -127,6 +129,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     CameraApp_Process();
+    Vofa_Process();
   }
   /* USER CODE END 3 */
 }
@@ -207,25 +210,6 @@ char *_sys_command_string(char *command, int length)
   return NULL;
 }
 #endif
-
-/**
-  * @brief  将 printf 输出重定向到 USART1
-  * @param  ch: 待发送字符
-  * @param  stream: 标准输出流
-  * @retval 成功时返回字符，失败时返回 EOF
-  */
-int fputc(int ch, FILE *stream)
-{
-  uint8_t data = (uint8_t)ch;
-
-  (void)stream;
-  if (HAL_UART_Transmit(&huart1, &data, 1U, 100U) != HAL_OK)
-  {
-    return EOF;
-  }
-
-  return ch;
-}
 
 /* USER CODE END 4 */
 

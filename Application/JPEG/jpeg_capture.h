@@ -1,6 +1,6 @@
 /**
  ******************************************************************************
- * @file    jpeg.h
+ * @file    jpeg_capture.h
  * @brief   JPEG 帧缓存与采集状态接口
  *
  * @details
@@ -15,12 +15,12 @@
  * JPEG_Capture_Start()、JPEG_Capture_GetData()、JPEG_Capture_GetSize()。
  *
  * @note
- * 64 KB 缓存为静态分配，不使用动态内存。
+ * 默认使用外部 SRAM 起始处的 64 KiB，不使用动态内存。
  ******************************************************************************
  */
 
-#ifndef APPLICATION_JPEG_H
-#define APPLICATION_JPEG_H
+#ifndef APPLICATION_JPEG_CAPTURE_H
+#define APPLICATION_JPEG_CAPTURE_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -64,4 +64,4 @@ uint32_t JPEG_Capture_GetSize(void);
 }
 #endif
 
-#endif /* APPLICATION_JPEG_H */
+#endif /* APPLICATION_JPEG_CAPTURE_H */

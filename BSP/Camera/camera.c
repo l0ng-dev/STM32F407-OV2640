@@ -37,6 +37,10 @@ static volatile uint32_t camera_frame_dma_ndtr;
 static volatile uint32_t camera_frame_dcmi_error;
 static volatile uint32_t camera_frame_dma_error;
 static uint32_t camera_buffer_word_count;
+static uint32_t camera_capture_start_tick;
+static uint32_t camera_first_progress_tick;
+static volatile uint32_t camera_frame_tick;
+static uint8_t camera_first_progress_seen;
 
 static HAL_StatusTypeDef Camera_ConfigureDma(uint32_t memory_increment,
                                              uint32_t memory_alignment);
@@ -52,6 +56,8 @@ void Camera_Init(void)
     camera_frame_dcmi_error = HAL_DCMI_ERROR_NONE;
     camera_frame_dma_error = HAL_DMA_ERROR_NONE;
     camera_buffer_word_count = 0U;
+    camera_first_progress_seen = 0U;
+    camera_frame_tick = 0U;
 }
 
 HAL_StatusTypeDef Camera_Stop(void)
@@ -175,12 +181,15 @@ Camera_Error_t Camera_StartJPEGCapture(uint8_t *buffer, uint32_t buffer_size)
     camera_frame_dma_ndtr = camera_buffer_word_count;
     camera_frame_dcmi_error = HAL_DCMI_ERROR_NONE;
     camera_frame_dma_error = HAL_DMA_ERROR_NONE;
+    camera_first_progress_seen = 0U;
+    camera_frame_tick = 0U;
     camera_state = CAMERA_CAPTURE_BUSY;
 
     __HAL_DCMI_CLEAR_FLAG(&hdcmi,
                           DCMI_FLAG_FRAMERI | DCMI_FLAG_OVRRI |
                           DCMI_FLAG_ERRRI);
 
+    camera_capture_start_tick = HAL_GetTick();
     hal_status = HAL_DCMI_Start_DMA(&hdcmi,
                                     DCMI_MODE_SNAPSHOT,
                                     (uint32_t)buffer,
@@ -201,6 +210,16 @@ Camera_Error_t Camera_StartJPEGCapture(uint8_t *buffer, uint32_t buffer_size)
 void Camera_Process(void)
 {
     HAL_StatusTypeDef stop_status;
+
+    /* 主循环首次观察到 DMA 计数变化；这是受轮询延迟影响的近似时刻。 */
+    if ((camera_state == CAMERA_CAPTURE_BUSY) &&
+        (camera_first_progress_seen == 0U) && (camera_frame_pending == 0U) &&
+        (camera_error_pending == 0U) &&
+        (__HAL_DMA_GET_COUNTER(&hdma_dcmi) < camera_buffer_word_count))
+    {
+        camera_first_progress_tick = HAL_GetTick();
+        camera_first_progress_seen = 1U;
+    }
 
     /*
      * JPEG 长度由帧结束时的 NDTR 推导；若 NDTR 先变为 0，说明缓存已写满，
@@ -266,6 +285,7 @@ void Camera_NotifyFrameEvent(DCMI_HandleTypeDef *dcmi_handle)
     if ((dcmi_handle == &hdcmi) &&
         (camera_state == CAMERA_CAPTURE_BUSY))
     {
+        camera_frame_tick = HAL_GetTick();
         __HAL_DMA_DISABLE(&hdma_dcmi);
         while ((hdma_dcmi.Instance->CR & DMA_SxCR_EN) != 0U)
         {
@@ -285,10 +305,13 @@ void Camera_NotifyError(DCMI_HandleTypeDef *dcmi_handle)
     if ((dcmi_handle == &hdcmi) &&
         (camera_state == CAMERA_CAPTURE_BUSY))
     {
+        camera_frame_dma_error = HAL_DMA_GetError(&hdma_dcmi);
+        camera_frame_dcmi_error = HAL_DCMI_GetError(dcmi_handle);
+        camera_frame_dma_ndtr = __HAL_DMA_GET_COUNTER(&hdma_dcmi);
         hdcmi.Instance->CR &= ~DCMI_CR_CAPTURE;
         __HAL_DMA_DISABLE(&hdma_dcmi);
 
-        if (HAL_DMA_GetError(&hdma_dcmi) != HAL_DMA_ERROR_NONE)
+        if (camera_frame_dma_error != HAL_DMA_ERROR_NONE)
         {
             camera_error = CAMERA_ERROR_DMA;
         }
@@ -314,6 +337,33 @@ Camera_Error_t Camera_GetError(void)
 uint32_t Camera_GetCapturedSize(void)
 {
     return camera_captured_size;
+}
+
+uint32_t Camera_GetDmaErrorSnapshot(void)
+{
+    return camera_frame_dma_error;
+}
+
+uint32_t Camera_GetDcmiErrorSnapshot(void)
+{
+    return camera_frame_dcmi_error;
+}
+
+uint32_t Camera_GetDmaRemainingSnapshot(void)
+{
+    return camera_frame_dma_ndtr;
+}
+
+int32_t Camera_GetFirstDmaProgressMs(void)
+{
+    return (camera_first_progress_seen != 0U) ?
+           (int32_t)(camera_first_progress_tick - camera_capture_start_tick) : -1;
+}
+
+int32_t Camera_GetDmaProgressToFrameMs(void)
+{
+    int32_t elapsed = (int32_t)(camera_frame_tick - camera_first_progress_tick);
+    return ((camera_first_progress_seen != 0U) && (elapsed >= 0)) ? elapsed : -1;
 }
 
 static HAL_StatusTypeDef Camera_ConfigureDma(uint32_t memory_increment,

@@ -5,13 +5,13 @@
  *
  * @details
  * 主要功能：
- * 1. 管理 IDLE、RGB565 LCD 和 JPEG XCAM 三种运行状态。
+ * 1. 管理 IDLE、RGB565 LCD 和 JPEG VOFA+ 三种运行状态。
  * 2. 处理 WKUP/KEY0 按键事件及模式安全切换。
  * 3. 协调 OV2640、DCMI/DMA、LCD、JPEG 解析和 USART2 发送。
  *
  * 模块关系：
  * main.c 调用本模块；本模块调用 Camera BSP、OV2640、JPEG 和 LCD 模块。
- * XCAM 没有独立源文件，其 USART2 JPEG 发送由本模块统一管理。
+ * USART2 使用 VOFA+ FireWater 格式发送图像和状态。
  *
  * 主要接口：
  * CameraApp_Init()、CameraApp_Process()、CameraApp_NotifyFrameEvent()。
@@ -25,12 +25,13 @@
 #include "camera_app.h"
 
 #include "camera.h"
-#include "jpeg.h"
+#include "jpeg_capture.h"
 #include "lcd.h"
 #include "main.h"
 #include "ov2640.h"
 #include "sccb.h"
-#include "usart.h"
+#include "sram_test.h"
+#include "vofa.h"
 
 #include <stdio.h>
 
@@ -43,8 +44,8 @@
 #define CAMERA_JPEG_HEIGHT            240U
 #define CAMERA_KEY_DEBOUNCE_MS        30U
 #define CAMERA_JPEG_SETTLE_MS         50U
-#define CAMERA_USART2_CHUNK_SIZE      1024U
-#define CAMERA_USART2_TIMEOUT_MS      100U
+/* 外部 SRAM 采集试验：JPEG 模式将传感器输入时钟二分频。 */
+#define CAMERA_JPEG_SENSOR_CLKRC      0x01U
 
 typedef struct
 {
@@ -69,6 +70,11 @@ static CameraApp_KeyState_t key0_key;
 static uint8_t jpeg_tx_active;
 static uint32_t jpeg_tx_offset;
 static uint32_t jpeg_tx_size;
+static uint8_t status_sent;
+static uint32_t last_status_tick;
+static uint32_t jpeg_capture_start_tick;
+static uint32_t jpeg_capture_ms;
+static uint32_t jpeg_send_start_tick;
 
 static uint8_t CameraApp_InitSensor(void);
 static void CameraApp_InitLcd(void);
@@ -86,16 +92,13 @@ static void CameraApp_ProcessJpeg(void);
 static uint8_t CameraApp_TransmitJpegChunk(void);
 static void CameraApp_EnterIdleWithError(const char *operation,
                                          uint32_t error_code);
+static void CameraApp_Diagnostic(const char *operation, uint32_t value);
 
 void CameraApp_Init(void)
 {
     uint32_t now = HAL_GetTick();
 
-    printf("========================\r\n");
-    printf(" Camera System Start\r\n");
-    printf(" MCU: STM32F407ZG\r\n");
-    printf(" Sensor: OV2640\r\n");
-    printf("========================\r\n");
+    printf("[CAM] Start\r\n");
 
     camera_mode = CAMERA_MODE_IDLE;
     camera_requested_mode = CAMERA_MODE_IDLE;
@@ -122,23 +125,25 @@ void CameraApp_Init(void)
     camera_sensor_ready = CameraApp_InitSensor();
     CameraApp_InitLcd();
 
-    printf("[LCD] Init OK\r\n");
-    printf("[UART1] Debug Ready\r\n");
-    printf("[UART2] JPEG TX Ready\r\n");
-    printf("[CAM] Mode: IDLE\r\n");
+    printf("[CAM] LCD ready, mode IDLE\r\n");
 }
 
 void CameraApp_Process(void)
 {
+    if ((Vofa_IsFaulted() != 0U) && (camera_mode == CAMERA_MODE_JPEG_VOFA))
+    {
+        CameraApp_StopCurrentMode();
+        camera_requested_mode = CAMERA_MODE_IDLE;
+    }
     CameraApp_ScanKeys();
 
     /*
      * 只有请求模式与当前模式不一致时才执行切换。
-     * JPEG 正在发送时先完成当前分块，避免 USART2 输出半帧数据。
+     * JPEG 正在发送时先完成整帧，再执行模式切换。
      */
     if (camera_requested_mode != camera_mode)
     {
-        if ((camera_mode == CAMERA_MODE_JPEG_XCAM) &&
+        if ((camera_mode == CAMERA_MODE_JPEG_VOFA) &&
             (jpeg_tx_active != 0U))
         {
             if (CameraApp_TransmitJpegChunk() == 0U)
@@ -151,7 +156,7 @@ void CameraApp_Process(void)
         {
             (void)CameraApp_StartRgb565Mode();
         }
-        else if (camera_requested_mode == CAMERA_MODE_JPEG_XCAM)
+        else if (camera_requested_mode == CAMERA_MODE_JPEG_VOFA)
         {
             (void)CameraApp_StartJpegMode();
         }
@@ -167,7 +172,7 @@ void CameraApp_Process(void)
     {
         CameraApp_ProcessRgb565();
     }
-    else if (camera_mode == CAMERA_MODE_JPEG_XCAM)
+    else if (camera_mode == CAMERA_MODE_JPEG_VOFA)
     {
         CameraApp_ProcessJpeg();
     }
@@ -185,7 +190,7 @@ void CameraApp_NotifyFrameEvent(DCMI_HandleTypeDef *dcmi_handle)
     {
         rgb_frame_pending = 1U;
     }
-    else if (camera_mode == CAMERA_MODE_JPEG_XCAM)
+    else if (camera_mode == CAMERA_MODE_JPEG_VOFA)
     {
         Camera_NotifyFrameEvent(dcmi_handle);
     }
@@ -198,7 +203,7 @@ void CameraApp_NotifyError(DCMI_HandleTypeDef *dcmi_handle)
         return;
     }
 
-    if (camera_mode == CAMERA_MODE_JPEG_XCAM)
+    if (camera_mode == CAMERA_MODE_JPEG_VOFA)
     {
         Camera_NotifyError(dcmi_handle);
     }
@@ -279,14 +284,12 @@ static void CameraApp_ScanKeys(void)
     /* 消抖完成后的按下沿只产生模式请求，不在按键处理处直接操作 DCMI。 */
     if (CameraApp_UpdateKey(&wkup_key, wkup_pressed, now) != 0U)
     {
-        printf("[KEY] WKUP Press\r\n");
         camera_requested_mode = CAMERA_MODE_RGB565_LCD;
     }
 
     if (CameraApp_UpdateKey(&key0_key, key0_pressed, now) != 0U)
     {
-        printf("[KEY] KEY0 Press\r\n");
-        camera_requested_mode = CAMERA_MODE_JPEG_XCAM;
+        camera_requested_mode = CAMERA_MODE_JPEG_VOFA;
     }
 }
 
@@ -394,12 +397,19 @@ static uint8_t CameraApp_StartJpegMode(void)
     SCCB_Status_t sccb_status;
     JPEG_Error_t jpeg_status;
 
+    if (Vofa_IsFaulted() != 0U)
+    {
+        camera_requested_mode = CAMERA_MODE_IDLE;
+        return 0U;
+    }
+
     /*
      * JPEG 模式需要可变长字节流连续写入 SRAM，因此开启 DCMI JPEG 位，
      * DMA 使用 Word 对齐且目标地址递增；与 LCD 直写参数不能混用。
      */
     CameraApp_StopCurrentMode();
-    printf("[CAM] Switch JPEG XCAM\r\n");
+    printf("[CAM] Switch JPEG VOFA+\r\n");
+    SRAM_ReportResult();
 
     if (camera_sensor_ready == 0U)
     {
@@ -426,6 +436,22 @@ static uint8_t CameraApp_StartJpegMode(void)
         return 0U;
     }
 
+    /* 仅 JPEG 模式降低传感器时钟；RGB 模式重新初始化时恢复原配置。 */
+    sccb_status = OV2640_WriteReg(0xFFU, 0x01U);
+    if (sccb_status == SCCB_STATUS_OK)
+    {
+        sccb_status = OV2640_WriteReg(0x11U, CAMERA_JPEG_SENSOR_CLKRC);
+    }
+    if (sccb_status == SCCB_STATUS_OK)
+    {
+        sccb_status = OV2640_WriteReg(0xFFU, 0x00U);
+    }
+    if (sccb_status != SCCB_STATUS_OK)
+    {
+        CameraApp_EnterIdleWithError("JPEG clock", (uint32_t)sccb_status);
+        return 0U;
+    }
+
     HAL_Delay(CAMERA_JPEG_SETTLE_MS);
 
     if (Camera_SetDCMIJPEGMode(DCMI_JPEG_ENABLE) != HAL_OK)
@@ -441,7 +467,9 @@ static uint8_t CameraApp_StartJpegMode(void)
     }
 
     JPEG_Capture_Init();
-    camera_mode = CAMERA_MODE_JPEG_XCAM;
+    status_sent = 0U;
+    camera_mode = CAMERA_MODE_JPEG_VOFA;
+    jpeg_capture_start_tick = HAL_GetTick();
     jpeg_status = JPEG_Capture_Start();
     if (jpeg_status != JPEG_ERROR_NONE)
     {
@@ -449,7 +477,7 @@ static uint8_t CameraApp_StartJpegMode(void)
         return 0U;
     }
 
-    printf("[JPEG] XCAM Start\r\n");
+    printf("[JPEG] VOFA+ Start\r\n");
     return 1U;
 }
 
@@ -501,6 +529,9 @@ static void CameraApp_ProcessJpeg(void)
 
     if (capture_state == JPEG_CAPTURE_ERROR)
     {
+        CameraApp_Diagnostic("DMA error flags", Camera_GetDmaErrorSnapshot());
+        CameraApp_Diagnostic("DCMI error flags", Camera_GetDcmiErrorSnapshot());
+        CameraApp_Diagnostic("DMA remaining words", Camera_GetDmaRemainingSnapshot());
         CameraApp_EnterIdleWithError("JPEG capture",
                                      (uint32_t)JPEG_Capture_GetError());
         return;
@@ -518,6 +549,8 @@ static void CameraApp_ProcessJpeg(void)
         }
 
         jpeg_tx_active = 1U;
+        jpeg_send_start_tick = HAL_GetTick();
+        jpeg_capture_ms = jpeg_send_start_tick - jpeg_capture_start_tick;
 #if (DEBUG_VERBOSE == 1)
         printf("[JPEG] Capture OK\r\n");
         printf("[JPEG] Size: %lu Bytes\r\n",
@@ -535,8 +568,9 @@ static void CameraApp_ProcessJpeg(void)
 #if (DEBUG_VERBOSE == 1)
         printf("[UART2] JPEG Send OK\r\n");
 #endif
-        if (camera_requested_mode == CAMERA_MODE_JPEG_XCAM)
+        if (camera_requested_mode == CAMERA_MODE_JPEG_VOFA)
         {
+            jpeg_capture_start_tick = HAL_GetTick();
             jpeg_status = JPEG_Capture_Start();
             if (jpeg_status != JPEG_ERROR_NONE)
             {
@@ -550,39 +584,51 @@ static void CameraApp_ProcessJpeg(void)
 static uint8_t CameraApp_TransmitJpegChunk(void)
 {
     const uint8_t *jpeg_data = JPEG_Capture_GetData();
-    uint32_t remaining;
-    uint16_t chunk_size;
+    Vofa_TxResult result;
 
     if (jpeg_tx_active == 0U)
     {
         return 1U;
     }
 
-    /*
-     * USART2 专门发送 JPEG 二进制数据，USART1 只承载文本调试日志，
-     * 避免 printf 字节混入 XCAM 图像流。分块发送限制单次阻塞时间，
-     * 同时保证一帧发送完成后才启动下一次采集。
-     */
-    remaining = jpeg_tx_size - jpeg_tx_offset;
-    chunk_size = (remaining > CAMERA_USART2_CHUNK_SIZE) ?
-                 (uint16_t)CAMERA_USART2_CHUNK_SIZE :
-                 (uint16_t)remaining;
-
-    if (HAL_UART_Transmit(&huart2,
-                          &jpeg_data[jpeg_tx_offset],
-                          chunk_size,
-                          CAMERA_USART2_TIMEOUT_MS) != HAL_OK)
+    result = Vofa_SendJpegChunk(jpeg_data, jpeg_tx_size, &jpeg_tx_offset,
+                                CAMERA_JPEG_WIDTH, CAMERA_JPEG_HEIGHT);
+    if (result == VOFA_TX_ERROR)
     {
-        CameraApp_EnterIdleWithError("USART2 JPEG", HAL_UART_GetError(&huart2));
+        CameraApp_EnterIdleWithError("VOFA JPEG", 0U);
         return 0U;
     }
-
-    jpeg_tx_offset += chunk_size;
-    if (jpeg_tx_offset < jpeg_tx_size)
+    if (result == VOFA_TX_MORE)
     {
         return 0U;
     }
 
+    /* 每秒最多发送一次数值，图片字节全部发送后才输出。 */
+    if ((status_sent == 0U) || ((HAL_GetTick() - last_status_tick) >= 1000U))
+    {
+        char status_frame[112];
+        uint32_t send_ms = HAL_GetTick() - jpeg_send_start_tick;
+        int status_length = snprintf(status_frame, sizeof(status_frame),
+                                     "sram:%u,%lu,%lu,%lu,%ld,%ld\n",
+                                     (unsigned int)SRAM_TestPassed(),
+                                     (unsigned long)jpeg_tx_size,
+                                     (unsigned long)jpeg_capture_ms,
+                                     (unsigned long)send_ms,
+                                     (long)Camera_GetFirstDmaProgressMs(),
+                                     (long)Camera_GetDmaProgressToFrameMs());
+        if ((status_length < 0) || ((size_t)status_length >= sizeof(status_frame)))
+        {
+            CameraApp_EnterIdleWithError("status format", 0U);
+            return 0U;
+        }
+        if (Vofa_SendLine(status_frame, (uint16_t)status_length) == 0U)
+        {
+            CameraApp_EnterIdleWithError("VOFA status", 0U);
+            return 0U;
+        }
+        last_status_tick = HAL_GetTick();
+        status_sent = 1U;
+    }
     jpeg_tx_active = 0U;
     jpeg_tx_offset = 0U;
     jpeg_tx_size = 0U;
@@ -598,4 +644,9 @@ static void CameraApp_EnterIdleWithError(const char *operation,
     CameraApp_StopCurrentMode();
     camera_requested_mode = CAMERA_MODE_IDLE;
     printf("[CAM] Mode: IDLE\r\n");
+}
+
+static void CameraApp_Diagnostic(const char *operation, uint32_t value)
+{
+    printf("diag %s 0x%08lX\n", operation, (unsigned long)value);
 }

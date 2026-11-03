@@ -68,6 +68,11 @@ void Camera_NotifyError(DCMI_HandleTypeDef *dcmi_handle);
 Camera_CaptureState_t Camera_GetState(void);
 Camera_Error_t Camera_GetError(void);
 uint32_t Camera_GetCapturedSize(void);
+uint32_t Camera_GetDmaErrorSnapshot(void);
+uint32_t Camera_GetDcmiErrorSnapshot(void);
+uint32_t Camera_GetDmaRemainingSnapshot(void);
+int32_t Camera_GetFirstDmaProgressMs(void);
+int32_t Camera_GetDmaProgressToFrameMs(void);
 
 #ifdef __cplusplus
 }

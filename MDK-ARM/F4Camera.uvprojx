@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;..\BSP\LCD;..\BSP\SCCB;..\BSP\OV2640;..\BSP\Camera;..\Application\JPEG;..\Application\Camera</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../BSP/LCD;../BSP/SCCB;../BSP/OV2640;../BSP/Camera;../Application/JPEG;../Application/Camera;../Application/VOFA;../BSP/SRAM</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -620,9 +620,9 @@
           <GroupName>Application/JPEG</GroupName>
           <Files>
             <File>
-              <FileName>jpeg.c</FileName>
+              <FileName>jpeg_capture.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\Application\JPEG\jpeg.c</FilePath>
+              <FilePath>..\Application\JPEG\jpeg_capture.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -633,6 +633,26 @@
               <FileName>camera_app.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Application\Camera\camera_app.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>BSP/SRAM</GroupName>
+          <Files>
+            <File>
+              <FileName>sram_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\SRAM\sram_test.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Application/VOFA</GroupName>
+          <Files>
+            <File>
+              <FileName>vofa.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Application\VOFA\vofa.c</FilePath>
             </File>
           </Files>
         </Group>

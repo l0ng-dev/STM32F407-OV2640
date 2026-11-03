@@ -37,7 +37,7 @@ typedef enum
 {
     CAMERA_MODE_IDLE = 0U,
     CAMERA_MODE_RGB565_LCD,
-    CAMERA_MODE_JPEG_XCAM
+    CAMERA_MODE_JPEG_VOFA
 } Camera_Mode_t;
 
 void CameraApp_Init(void);
