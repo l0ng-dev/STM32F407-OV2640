@@ -108,6 +108,33 @@ HAL_StatusTypeDef Camera_ConfigureJpegDma(void)
                                DMA_MDATAALIGN_WORD);
 }
 
+HAL_StatusTypeDef Camera_ConfigureRGB565SramDma(void)
+{
+    return Camera_ConfigureDma(DMA_MINC_ENABLE, DMA_MDATAALIGN_WORD);
+}
+
+HAL_StatusTypeDef Camera_StartRGB565SramSnapshot(uint32_t destination,
+                                                 uint32_t word_count)
+{
+    if ((destination == 0U) || ((destination & 3U) != 0U) ||
+        (word_count == 0U) || (word_count > 0xFFFFU) ||
+        (hdcmi.Init.JPEGMode != DCMI_JPEG_DISABLE) ||
+        (hdma_dcmi.Instance != DMA2_Stream1) ||
+        (hdma_dcmi.Init.Channel != DMA_CHANNEL_1) ||
+        (hdma_dcmi.Init.Mode != DMA_NORMAL) ||
+        (hdma_dcmi.Init.PeriphDataAlignment != DMA_PDATAALIGN_WORD) ||
+        (hdma_dcmi.Init.MemDataAlignment != DMA_MDATAALIGN_WORD) ||
+        (hdma_dcmi.Init.MemInc != DMA_MINC_ENABLE))
+    {
+        return HAL_ERROR;
+    }
+
+    __HAL_DCMI_CLEAR_FLAG(&hdcmi, DCMI_FLAG_FRAMERI | DCMI_FLAG_OVRRI |
+                          DCMI_FLAG_ERRRI);
+    return HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT,
+                              destination, word_count);
+}
+
 /**
  * @brief  启动一帧 RGB565 到 LCD GRAM 的 Snapshot
  * @note   Snapshot 在一帧后自动结束；上层收到帧事件后重新设置 LCD 窗口，

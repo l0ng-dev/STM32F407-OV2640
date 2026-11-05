@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../BSP/LCD;../BSP/SCCB;../BSP/OV2640;../BSP/Camera;../Application/JPEG;../Application/Camera;../Application/VOFA;../BSP/SRAM</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../BSP/LCD;../BSP/SCCB;../BSP/OV2640;../BSP/Camera;../Application/JPEG;../Application/Camera;../Application/VOFA;../BSP/SRAM;../AI/Model;../AI/Middlewares/Inc</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -381,6 +381,26 @@
         </TargetArmAds>
       </TargetOption>
       <Groups>
+        <Group>
+          <GroupName>AI Model</GroupName>
+          <Files>
+            <File>
+              <FileName>network.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../AI/Model/network.c</FilePath>
+            </File>
+            <File>
+              <FileName>network_data.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../AI/Model/network_data.c</FilePath>
+            </File>
+            <File>
+              <FileName>NetworkRuntime1210_CM4_Keil.lib</FileName>
+              <FileType>4</FileType>
+              <FilePath>../AI/Middlewares/Lib/NetworkRuntime1210_CM4_Keil.lib</FilePath>
+            </File>
+          </Files>
+        </Group>
         <Group>
           <GroupName>Application/MDK-ARM</GroupName>
           <Files>
@@ -633,6 +653,21 @@
               <FileName>camera_app.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Application\Camera\camera_app.c</FilePath>
+            </File>
+            <File>
+              <FileName>rgb565_preprocess.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Application\Camera\rgb565_preprocess.c</FilePath>
+            </File>
+            <File>
+              <FileName>gesture_inference.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Application\Camera\gesture_inference.c</FilePath>
+            </File>
+            <File>
+              <FileName>camera_validation.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Application\Camera\camera_validation.c</FilePath>
             </File>
           </Files>
         </Group>

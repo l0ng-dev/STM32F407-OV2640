@@ -23,6 +23,7 @@
 #include "jpeg_capture.h"
 
 #include "camera.h"
+#include "sram_layout.h"
 #include <stdio.h>
 
 #define JPEG_SOI_FIRST_BYTE   0xFFU
@@ -36,7 +37,10 @@
 #define JPEG_BUFFER_WORDS     (JPEG_BUFFER_SIZE_BYTES / sizeof(uint32_t))
 /* 当前阶段验证 DCMI DMA 写外部 SRAM；设为 0 可恢复片内缓存。 */
 #define JPEG_BUFFER_EXTERNAL_SRAM 1
-#define JPEG_EXTERNAL_SRAM_BASE  0x68000000UL
+#define JPEG_EXTERNAL_SRAM_BASE  SRAM_LAYOUT_JPEG_BASE
+#if JPEG_BUFFER_SIZE_BYTES > SRAM_LAYOUT_JPEG_SIZE
+#error "JPEG buffer exceeds its SRAM region"
+#endif
 #if (DEBUG_VERBOSE == 1)
 #define JPEG_DEBUG_DUMP_BYTES 32U
 #endif

@@ -1,7 +1,7 @@
 /**
  ******************************************************************************
  * @file    camera_app.h
- * @brief   Camera 双模式应用管理接口
+ * @brief   摄像头模式与采集调度接口
  *
  * @details
  * 主要功能：
@@ -30,14 +30,15 @@ extern "C" {
 
 /**
  * @brief Camera Application 运行模式
- * @note  IDLE 表示外设已初始化但未采集；另外两种状态对应独立的
+ * @note  IDLE 表示外设已初始化但未采集；其余三种状态对应各自的
  *        OV2640、DCMI 和 DMA 运行参数，不能直接复用 DMA 目标地址。
  */
 typedef enum
 {
     CAMERA_MODE_IDLE = 0U,
     CAMERA_MODE_RGB565_LCD,
-    CAMERA_MODE_JPEG_VOFA
+    CAMERA_MODE_JPEG_VOFA,
+    CAMERA_MODE_RGB565_SRAM
 } Camera_Mode_t;
 
 void CameraApp_Init(void);

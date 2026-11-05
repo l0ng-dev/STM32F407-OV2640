@@ -2,22 +2,7 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : 系统入口与 CubeMX 外设初始化
-  *
-  * @details
-  * 主要功能：
-  * 1. 完成 HAL、系统时钟和 CubeMX 外设初始化。
-  * 2. 调用 CameraApp_Init()，并在主循环中持续调用 CameraApp_Process()。
-  * 3. 将 DCMI 帧事件和错误回调转发给 Camera Application。
-  *
-  * 模块关系：
-  * Core 调用 Camera Application；Camera Application 再协调 BSP 与 HAL。
-  *
-  * 主要接口：
-  * main()、HAL_DCMI_FrameEventCallback()、HAL_DCMI_ErrorCallback()。
-  *
-  * @note
-  * 本文件不承载摄像头模式逻辑；CubeMX 生成内容仅在 USER CODE 区维护。
+  * @brief          : Main program body
   ******************************************************************************
   * @attention
   *
@@ -116,6 +101,7 @@ int main(void)
   MX_FSMC_Init();
   MX_TIM6_Init();
   MX_USART2_UART_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   SRAM_Test();
   CameraApp_Init();

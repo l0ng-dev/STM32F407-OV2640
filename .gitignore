@@ -9,6 +9,7 @@
 *.crf
 *.elf
 *.lib
+!AI/Middlewares/Lib/NetworkRuntime1210_CM4_Keil.lib
 *.lnp
 *.dep
 
@@ -33,6 +34,8 @@ Backup/
 *~
 .DS_Store
 Thumbs.db
+__pycache__/
+*.pyc
 
 # Local agent metadata
 .agents/

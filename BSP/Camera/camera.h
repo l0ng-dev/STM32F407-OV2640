@@ -59,6 +59,9 @@ HAL_StatusTypeDef Camera_Stop(void);
 HAL_StatusTypeDef Camera_SetDCMIJPEGMode(uint32_t jpeg_mode);
 HAL_StatusTypeDef Camera_ConfigureRGB565LcdDma(void);
 HAL_StatusTypeDef Camera_ConfigureJpegDma(void);
+HAL_StatusTypeDef Camera_ConfigureRGB565SramDma(void);
+HAL_StatusTypeDef Camera_StartRGB565SramSnapshot(uint32_t destination,
+                                                 uint32_t word_count);
 HAL_StatusTypeDef Camera_StartRGB565Snapshot(uint32_t destination,
                                              uint32_t word_count);
 Camera_Error_t Camera_StartJPEGCapture(uint8_t *buffer, uint32_t buffer_size);

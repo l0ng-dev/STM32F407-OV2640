@@ -1,11 +1,11 @@
 /**
  ******************************************************************************
  * @file    camera_app.c
- * @brief   Camera 双模式应用管理模块
+ * @brief   摄像头模式、按键与采集调度
  *
  * @details
  * 主要功能：
- * 1. 管理 IDLE、RGB565 LCD 和 JPEG VOFA+ 三种运行状态。
+ * 1. 管理空闲、LCD 预览、JPEG 和 SRAM 单帧状态。
  * 2. 处理 WKUP/KEY0 按键事件及模式安全切换。
  * 3. 协调 OV2640、DCMI/DMA、LCD、JPEG 解析和 USART2 发送。
  *
@@ -25,12 +25,14 @@
 #include "camera_app.h"
 
 #include "camera.h"
+#include "camera_validation.h"
 #include "jpeg_capture.h"
 #include "lcd.h"
 #include "main.h"
 #include "ov2640.h"
 #include "sccb.h"
 #include "sram_test.h"
+#include "sram_layout.h"
 #include "vofa.h"
 
 #include <stdio.h>
@@ -46,6 +48,12 @@
 #define CAMERA_JPEG_SETTLE_MS         50U
 /* 外部 SRAM 采集试验：JPEG 模式将传感器输入时钟二分频。 */
 #define CAMERA_JPEG_SENSOR_CLKRC      0x01U
+/* RGB 路径发生 DCMI overrun，先以已用于 JPEG 的分频值作对照。 */
+#define CAMERA_RGB_SENSOR_CLKRC       0x01U
+#define CAMERA_KEY_LONG_MS             1200U
+#define CAMERA_RGB_SRAM_TIMEOUT_MS     3000U
+/* 单帧模式先给传感器自动曝光稳定时间，效果以实测为准。 */
+#define CAMERA_RGB_SRAM_SETTLE_MS      1000U
 
 typedef struct
 {
@@ -75,8 +83,14 @@ static uint32_t last_status_tick;
 static uint32_t jpeg_capture_start_tick;
 static uint32_t jpeg_capture_ms;
 static uint32_t jpeg_send_start_tick;
+static uint32_t key0_press_tick;
+static uint8_t key0_long_handled;
+static uint8_t key0_armed;
+static uint32_t rgb_sram_start_tick;
+static uint8_t rgb_sram_complete;
 
 static uint8_t CameraApp_InitSensor(void);
+static SCCB_Status_t CameraApp_SetSensorClock(uint8_t clock_divider);
 static void CameraApp_InitLcd(void);
 static void CameraApp_ShowLcdId(uint16_t id);
 static void CameraApp_ScanKeys(void);
@@ -86,6 +100,8 @@ static uint8_t CameraApp_UpdateKey(CameraApp_KeyState_t *key,
 static void CameraApp_StopCurrentMode(void);
 static uint8_t CameraApp_StartRgb565Mode(void);
 static uint8_t CameraApp_StartJpegMode(void);
+static uint8_t CameraApp_StartRgb565SramMode(void);
+static void CameraApp_ProcessRgb565Sram(void);
 static HAL_StatusTypeDef CameraApp_StartRgb565Snapshot(void);
 static void CameraApp_ProcessRgb565(void);
 static void CameraApp_ProcessJpeg(void);
@@ -108,6 +124,8 @@ void CameraApp_Init(void)
     jpeg_tx_active = 0U;
     jpeg_tx_offset = 0U;
     jpeg_tx_size = 0U;
+    key0_long_handled = 0U;
+    key0_press_tick = now;
 
     wkup_key.stable_pressed =
         (HAL_GPIO_ReadPin(WKUP_GPIO_Port, WKUP_Pin) == GPIO_PIN_SET) ? 1U : 0U;
@@ -115,9 +133,10 @@ void CameraApp_Init(void)
     wkup_key.candidate_tick = now;
 
     key0_key.stable_pressed =
-        (HAL_GPIO_ReadPin(KEY0_GPIO_Port, KEY0_Pin) == GPIO_PIN_RESET) ? 1U : 0U;
+        (HAL_GPIO_ReadPin(KEY0_GPIO_Port, KEY0_Pin) == GPIO_PIN_SET) ? 1U : 0U;
     key0_key.candidate_pressed = key0_key.stable_pressed;
     key0_key.candidate_tick = now;
+    key0_armed = (key0_key.stable_pressed == 0U) ? 1U : 0U;
 
     Camera_Init();
     JPEG_Capture_Init();
@@ -160,6 +179,10 @@ void CameraApp_Process(void)
         {
             (void)CameraApp_StartJpegMode();
         }
+        else if (camera_requested_mode == CAMERA_MODE_RGB565_SRAM)
+        {
+            (void)CameraApp_StartRgb565SramMode();
+        }
         else
         {
             CameraApp_StopCurrentMode();
@@ -176,6 +199,10 @@ void CameraApp_Process(void)
     {
         CameraApp_ProcessJpeg();
     }
+    else if (camera_mode == CAMERA_MODE_RGB565_SRAM)
+    {
+        CameraApp_ProcessRgb565Sram();
+    }
 }
 
 void CameraApp_NotifyFrameEvent(DCMI_HandleTypeDef *dcmi_handle)
@@ -186,7 +213,8 @@ void CameraApp_NotifyFrameEvent(DCMI_HandleTypeDef *dcmi_handle)
     }
 
     /* 中断上下文只设置标志或转发事件，耗时处理统一留在主循环。 */
-    if (camera_mode == CAMERA_MODE_RGB565_LCD)
+    if ((camera_mode == CAMERA_MODE_RGB565_LCD) ||
+        (camera_mode == CAMERA_MODE_RGB565_SRAM))
     {
         rgb_frame_pending = 1U;
     }
@@ -207,7 +235,8 @@ void CameraApp_NotifyError(DCMI_HandleTypeDef *dcmi_handle)
     {
         Camera_NotifyError(dcmi_handle);
     }
-    else if (camera_mode == CAMERA_MODE_RGB565_LCD)
+    else if ((camera_mode == CAMERA_MODE_RGB565_LCD) ||
+             (camera_mode == CAMERA_MODE_RGB565_SRAM))
     {
         dcmi_error_code = HAL_DCMI_GetError(dcmi_handle);
         dcmi_error_pending = 1U;
@@ -245,6 +274,16 @@ static uint8_t CameraApp_InitSensor(void)
     return 1U;
 }
 
+static SCCB_Status_t CameraApp_SetSensorClock(uint8_t clock_divider)
+{
+    SCCB_Status_t status = OV2640_WriteReg(0xFFU, 0x01U);
+    if (status == SCCB_STATUS_OK)
+        status = OV2640_WriteReg(0x11U, clock_divider);
+    if (status == SCCB_STATUS_OK)
+        status = OV2640_WriteReg(0xFFU, 0x00U);
+    return status;
+}
+
 static void CameraApp_InitLcd(void)
 {
     lcd_init();
@@ -275,11 +314,12 @@ static void CameraApp_ScanKeys(void)
     uint32_t now = HAL_GetTick();
     uint8_t wkup_pressed;
     uint8_t key0_pressed;
+    uint8_t key0_was_pressed;
 
     wkup_pressed =
         (HAL_GPIO_ReadPin(WKUP_GPIO_Port, WKUP_Pin) == GPIO_PIN_SET) ? 1U : 0U;
     key0_pressed =
-        (HAL_GPIO_ReadPin(KEY0_GPIO_Port, KEY0_Pin) == GPIO_PIN_RESET) ? 1U : 0U;
+        (HAL_GPIO_ReadPin(KEY0_GPIO_Port, KEY0_Pin) == GPIO_PIN_SET) ? 1U : 0U;
 
     /* 消抖完成后的按下沿只产生模式请求，不在按键处理处直接操作 DCMI。 */
     if (CameraApp_UpdateKey(&wkup_key, wkup_pressed, now) != 0U)
@@ -287,9 +327,26 @@ static void CameraApp_ScanKeys(void)
         camera_requested_mode = CAMERA_MODE_RGB565_LCD;
     }
 
+    key0_was_pressed = key0_key.stable_pressed;
     if (CameraApp_UpdateKey(&key0_key, key0_pressed, now) != 0U)
     {
-        camera_requested_mode = CAMERA_MODE_JPEG_VOFA;
+        key0_press_tick = now;
+        key0_long_handled = 0U;
+    }
+    if ((key0_armed != 0U) && (key0_key.stable_pressed != 0U) &&
+        (key0_long_handled == 0U) &&
+        ((now - key0_press_tick) >= CAMERA_KEY_LONG_MS))
+    {
+        key0_long_handled = 1U;
+        camera_requested_mode = CAMERA_MODE_RGB565_SRAM;
+    }
+    if ((key0_was_pressed != 0U) && (key0_key.stable_pressed == 0U))
+    {
+        if ((key0_armed != 0U) && (key0_long_handled == 0U))
+        {
+            camera_requested_mode = CAMERA_MODE_JPEG_VOFA;
+        }
+        key0_armed = 1U;
     }
 }
 
@@ -369,6 +426,14 @@ static uint8_t CameraApp_StartRgb565Mode(void)
         return 0U;
     }
 
+    sccb_status = CameraApp_SetSensorClock(CAMERA_RGB_SENSOR_CLKRC);
+    if (sccb_status != SCCB_STATUS_OK)
+    {
+        CameraApp_EnterIdleWithError("RGB clock", (uint32_t)sccb_status);
+        return 0U;
+    }
+    HAL_Delay(CAMERA_JPEG_SETTLE_MS);
+
     if (Camera_SetDCMIJPEGMode(DCMI_JPEG_DISABLE) != HAL_OK)
     {
         CameraApp_EnterIdleWithError("RGB DCMI", HAL_DCMI_GetError(&hdcmi));
@@ -390,6 +455,134 @@ static uint8_t CameraApp_StartRgb565Mode(void)
 
     printf("[LCD] Preview Start\r\n");
     return 1U;
+}
+
+static uint8_t CameraApp_StartRgb565SramMode(void)
+{
+    SCCB_Status_t sccb_status;
+    OV2640_Status_t init_status;
+
+    CameraApp_StopCurrentMode();
+    if (SRAM_TestPassed() == 0U)
+    {
+        CameraApp_EnterIdleWithError("RGB SRAM test", 0U);
+        return 0U;
+    }
+    if (camera_sensor_ready == 0U)
+    {
+        camera_sensor_ready = CameraApp_InitSensor();
+        if (camera_sensor_ready == 0U)
+        {
+            CameraApp_EnterIdleWithError("RGB SRAM sensor init", 0U);
+            return 0U;
+        }
+    }
+    else
+    {
+        init_status = OV2640_Init();
+        if (init_status != OV2640_STATUS_OK)
+        {
+            camera_sensor_ready = 0U;
+            CameraApp_EnterIdleWithError("RGB SRAM sensor", (uint32_t)init_status);
+            return 0U;
+        }
+    }
+    sccb_status = OV2640_SetOutputSize(CAMERA_RGB_WIDTH, CAMERA_RGB_HEIGHT);
+    if (sccb_status != SCCB_STATUS_OK)
+    {
+        CameraApp_EnterIdleWithError("RGB SRAM size", (uint32_t)sccb_status);
+        return 0U;
+    }
+    sccb_status = CameraApp_SetSensorClock(CAMERA_RGB_SENSOR_CLKRC);
+    if (sccb_status != SCCB_STATUS_OK)
+    {
+        CameraApp_EnterIdleWithError("RGB SRAM clock", (uint32_t)sccb_status);
+        return 0U;
+    }
+    HAL_Delay(CAMERA_RGB_SRAM_SETTLE_MS);
+    if (Camera_SetDCMIJPEGMode(DCMI_JPEG_DISABLE) != HAL_OK)
+    {
+        CameraApp_EnterIdleWithError("RGB SRAM DCMI", HAL_DCMI_GetError(&hdcmi));
+        return 0U;
+    }
+    if (Camera_ConfigureRGB565SramDma() != HAL_OK)
+    {
+        CameraApp_EnterIdleWithError("RGB SRAM DMA", HAL_DMA_GetError(hdcmi.DMA_Handle));
+        return 0U;
+    }
+    rgb_sram_complete = 0U;
+    rgb_frame_pending = 0U;
+    dcmi_error_pending = 0U;
+    camera_mode = CAMERA_MODE_RGB565_SRAM;
+    rgb_sram_start_tick = HAL_GetTick();
+    if (Camera_StartRGB565SramSnapshot(SRAM_LAYOUT_RGB_BASE,
+                                       CAMERA_RGB_WORD_COUNT) != HAL_OK)
+    {
+        CameraApp_EnterIdleWithError("RGB SRAM start", HAL_DCMI_GetError(&hdcmi));
+        return 0U;
+    }
+    printf("[CAM] RGB SRAM capture start\r\n");
+    return 1U;
+}
+
+static void CameraApp_ProcessRgb565Sram(void)
+{
+    uint32_t i;
+    const volatile uint16_t *pixels = (const volatile uint16_t *)SRAM_LAYOUT_RGB_BASE;
+
+    if (rgb_sram_complete != 0U)
+    {
+        CameraValidation_Process();
+        return;
+    }
+    if (dcmi_error_pending != 0U)
+    {
+        CameraApp_EnterIdleWithError("RGB SRAM capture", dcmi_error_code);
+        return;
+    }
+    if (rgb_frame_pending != 0U)
+    {
+        rgb_frame_pending = 0U;
+        if ((__HAL_DMA_GET_COUNTER(hdcmi.DMA_Handle) != 0U) ||
+            (HAL_DMA_GetError(hdcmi.DMA_Handle) != HAL_DMA_ERROR_NONE) ||
+            (HAL_DCMI_GetError(&hdcmi) != HAL_DCMI_ERROR_NONE))
+        {
+            CameraApp_EnterIdleWithError("RGB SRAM incomplete", HAL_DCMI_GetError(&hdcmi));
+            return;
+        }
+        if (HAL_DCMI_Stop(&hdcmi) != HAL_OK)
+        {
+            CameraApp_EnterIdleWithError("RGB SRAM stop", HAL_DCMI_GetError(&hdcmi));
+            return;
+        }
+        rgb_sram_complete = 1U;
+        lcd_set_window(0U, 0U, CAMERA_RGB_WIDTH, CAMERA_RGB_HEIGHT);
+        lcd_write_ram_prepare();
+        for (i = 0U; i < CAMERA_RGB_WIDTH * CAMERA_RGB_HEIGHT; i++)
+        {
+            LCD->LCD_RAM = pixels[i];
+        }
+        printf("[CAM] RGB SRAM frame complete: %lu bytes\r\n",
+               (unsigned long)(CAMERA_RGB_WORD_COUNT * sizeof(uint32_t)));
+    }
+    else if ((HAL_GetTick() - rgb_sram_start_tick) >= CAMERA_RGB_SRAM_TIMEOUT_MS)
+    {
+        uint32_t remaining = __HAL_DMA_GET_COUNTER(hdcmi.DMA_Handle);
+        uint32_t dcmi_raw = hdcmi.Instance->RISR;
+        uint32_t dcmi_status = hdcmi.Instance->SR;
+        uint32_t dcmi_control = hdcmi.Instance->CR;
+        uint32_t dcmi_error = HAL_DCMI_GetError(&hdcmi);
+        uint32_t dma_error = HAL_DMA_GetError(hdcmi.DMA_Handle);
+        uint32_t dma_status = DMA2->LISR;
+
+        printf("diag rgb ndtr=%lu ris=%08lX sr=%08lX cr=%08lX\n",
+               (unsigned long)remaining, (unsigned long)dcmi_raw,
+               (unsigned long)dcmi_status, (unsigned long)dcmi_control);
+        printf("diag rgb dcmi=%08lX dma=%08lX lisr=%08lX\n",
+               (unsigned long)dcmi_error, (unsigned long)dma_error,
+               (unsigned long)dma_status);
+        CameraApp_EnterIdleWithError("RGB SRAM timeout", remaining);
+    }
 }
 
 static uint8_t CameraApp_StartJpegMode(void)
@@ -436,7 +629,7 @@ static uint8_t CameraApp_StartJpegMode(void)
         return 0U;
     }
 
-    /* 仅 JPEG 模式降低传感器时钟；RGB 模式重新初始化时恢复原配置。 */
+    /* JPEG 使用既有分频设置，RGB 切换时会单独设置其分频。 */
     sccb_status = OV2640_WriteReg(0xFFU, 0x01U);
     if (sccb_status == SCCB_STATUS_OK)
     {
