@@ -43,7 +43,7 @@ OV2640 JPEG → DCMI / DMA2 Stream1 → 外部 SRAM 双缓冲
 - `AI/Model/` 和 `AI/Middlewares/`：生成模型和匹配运行库；许可见 `AI/LICENSE.txt`。LCD 汉字子集许可见 `BSP/LCD/OFL-NotoSansSC.txt`。
 - `Tools/`：保留的单帧预处理和推理对照工具，依赖旧验证入口。
 
-使用 Keil MDK 打开 `MDK-ARM/F4Camera.uvprojx`；本机验证使用 ArmClang 6.24。CubeMX 配置及 Keil 下载由使用者操作。更多实现说明见 [项目架构说明](项目架构说明.md)，v1.1.0 历史记录见 [项目状态与验证记录](项目状态与验证记录.md)。
+使用 Keil MDK 打开 `MDK-ARM/F4Camera.uvprojx`；本机验证使用 ArmClang 6.24。CubeMX 配置及 Keil 下载由使用者操作。更多实现说明见 [项目架构说明](项目架构说明.md)。
 
 ## 模型与内存
 

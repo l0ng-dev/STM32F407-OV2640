@@ -41,4 +41,6 @@ __pycache__/
 .agents/
 AGENTS.md
 F4Camera边缘AI项目交接报告.md
+项目状态与验证记录.md
+PROJECT_STATUS.md
 MDK-ARM/F4Camera_build.log
