@@ -5,7 +5,7 @@
  *
  * @details
  * 主要功能：
- * 1. 提供 DMA 可访问的 64 KB JPEG 缓存。
+ * 1. 提供两块 DMA 可访问的 64 KB JPEG 缓存。
  * 2. 协调 Camera BSP 完成单帧采集并解析 SOI/EOI 边界。
  * 3. 在 DEBUG_VERBOSE 模式下统计 JPEG Marker 和输出缓存头。
  *
@@ -22,7 +22,7 @@
 
 #include "jpeg_capture.h"
 
-#include "camera.h"
+#include "camera_dcmi.h"
 #include "sram_layout.h"
 #include <stdio.h>
 
@@ -34,11 +34,9 @@
 #define JPEG_DQT_SECOND_BYTE  0xDBU
 #define JPEG_SOF_SECOND_BYTE  0xC0U
 #define JPEG_DHT_SECOND_BYTE  0xC4U
-#define JPEG_BUFFER_WORDS     (JPEG_BUFFER_SIZE_BYTES / sizeof(uint32_t))
-/* 当前阶段验证 DCMI DMA 写外部 SRAM；设为 0 可恢复片内缓存。 */
-#define JPEG_BUFFER_EXTERNAL_SRAM 1
-#define JPEG_EXTERNAL_SRAM_BASE  SRAM_LAYOUT_JPEG_BASE
-#if JPEG_BUFFER_SIZE_BYTES > SRAM_LAYOUT_JPEG_SIZE
+#if (JPEG_BUFFER_SIZE_BYTES > SRAM_LAYOUT_JPEG_SIZE) || \
+    (JPEG_BUFFER_SIZE_BYTES > SRAM_LAYOUT_JPEG2_SIZE) || \
+    ((SRAM_LAYOUT_JPEG2_BASE & 3UL) != 0UL)
 #error "JPEG buffer exceeds its SRAM region"
 #endif
 #if (DEBUG_VERBOSE == 1)
@@ -46,14 +44,13 @@
 #endif
 
 /*
- * 外部 SRAM 在 MX_FSMC_Init() 后可用；采集、解析和发送依次独占缓存。
- * 起始地址按 4 字节对齐，容量 64 KiB，不使用 CCM。
+ * 外部 SRAM 在 MX_FSMC_Init() 后可用；每块缓存的采集与发送不可重叠。
+ * 第二块复用预留区，仅在 JPEG 模式使用；不使用 CCM。
  */
-#if JPEG_BUFFER_EXTERNAL_SRAM
-#define jpeg_buffer ((uint32_t *)JPEG_EXTERNAL_SRAM_BASE)
-#else
-static uint32_t jpeg_buffer[JPEG_BUFFER_WORDS] __attribute__((aligned(4)));
-#endif
+static uint8_t *const jpeg_buffers[2] = {
+    (uint8_t *)SRAM_LAYOUT_JPEG_BASE, (uint8_t *)SRAM_LAYOUT_JPEG2_BASE
+};
+static uint8_t jpeg_buffer_index;
 static JPEG_CaptureState_t jpeg_capture_state = JPEG_CAPTURE_IDLE;
 static JPEG_Error_t jpeg_capture_error = JPEG_ERROR_NONE;
 static uint32_t jpeg_frame_offset;
@@ -63,7 +60,7 @@ static uint32_t jpeg_frame_size;
 /* Marker 统计只用于判断 JPEG 结构是否完整，默认关闭以避免串口刷屏。 */
 static void JPEG_PrintMarkerStatistic(uint32_t captured_size)
 {
-    const uint8_t *data = (const uint8_t *)(const void *)jpeg_buffer;
+    const uint8_t *data = jpeg_buffers[jpeg_buffer_index];
     uint32_t soi_count = 0U;
     uint32_t eoi_count = 0U;
     uint32_t sos_count = 0U;
@@ -122,7 +119,7 @@ static void JPEG_PrintMarkerStatistic(uint32_t captured_size)
 
 static void JPEG_PrintBufferHead(void)
 {
-    const uint8_t *data = (const uint8_t *)(const void *)jpeg_buffer;
+    const uint8_t *data = jpeg_buffers[jpeg_buffer_index];
     uint32_t index;
 
     printf("[JPEG] Buffer Head: ");
@@ -136,14 +133,15 @@ static void JPEG_PrintBufferHead(void)
 
 static JPEG_Error_t JPEG_ParseFrame(uint32_t captured_size)
 {
-    const uint8_t *data = (const uint8_t *)(const void *)jpeg_buffer;
+    const uint8_t *data = jpeg_buffers[jpeg_buffer_index];
     uint32_t index;
-    uint32_t soi_offset = captured_size;
+    uint32_t soi_offset;
 
     if (captured_size > JPEG_BUFFER_SIZE_BYTES)
     {
         captured_size = JPEG_BUFFER_SIZE_BYTES;
     }
+    soi_offset = captured_size;
 
 #if (DEBUG_VERBOSE == 1)
     JPEG_PrintMarkerStatistic(captured_size);
@@ -180,36 +178,17 @@ static JPEG_Error_t JPEG_ParseFrame(uint32_t captured_size)
     return JPEG_ERROR_EOI_NOT_FOUND;
 }
 
-void JPEG_Buffer_Init(void)
-{
-    JPEG_Buffer_Reset();
-}
-
-void JPEG_Buffer_Reset(void)
+static void JPEG_ResetFrame(void)
 {
     jpeg_frame_offset = 0U;
     jpeg_frame_size = 0U;
 }
 
-uint8_t *JPEG_Buffer_GetData(void)
-{
-    return (uint8_t *)(void *)jpeg_buffer;
-}
-
-uint32_t JPEG_Buffer_GetCapacity(void)
-{
-    return JPEG_BUFFER_SIZE_BYTES;
-}
-
-uint32_t JPEG_Buffer_GetSize(void)
-{
-    return jpeg_frame_size;
-}
-
 void JPEG_Capture_Init(void)
 {
     Camera_Init();
-    JPEG_Buffer_Init();
+    jpeg_buffer_index = 1U;
+    JPEG_ResetFrame();
     jpeg_capture_error = JPEG_ERROR_NONE;
     jpeg_capture_state = JPEG_CAPTURE_IDLE;
 }
@@ -218,13 +197,14 @@ JPEG_Error_t JPEG_Capture_Start(void)
 {
     Camera_Error_t camera_status;
 
-    /* 每帧复用同一缓存；发送完成后才由 CameraApp 请求下一帧。 */
-    JPEG_Buffer_Reset();
+    /* 调用方必须保证下一块缓存不再被发送使用。 */
+    jpeg_buffer_index ^= 1U;
+    JPEG_ResetFrame();
     jpeg_capture_error = JPEG_ERROR_NONE;
     jpeg_capture_state = JPEG_CAPTURE_BUSY;
 
-    camera_status = Camera_StartJPEGCapture(JPEG_Buffer_GetData(),
-                                            JPEG_Buffer_GetCapacity());
+    camera_status = Camera_StartJPEGCapture(jpeg_buffers[jpeg_buffer_index],
+                                           JPEG_BUFFER_SIZE_BYTES);
     if (camera_status != CAMERA_ERROR_NONE)
     {
         jpeg_capture_error =
@@ -283,7 +263,7 @@ JPEG_Error_t JPEG_Capture_GetError(void)
 
 const uint8_t *JPEG_Capture_GetData(void)
 {
-    return ((const uint8_t *)(const void *)jpeg_buffer) + jpeg_frame_offset;
+    return jpeg_buffers[jpeg_buffer_index] + jpeg_frame_offset;
 }
 
 uint32_t JPEG_Capture_GetSize(void)

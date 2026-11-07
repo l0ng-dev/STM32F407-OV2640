@@ -1,7 +1,12 @@
+/** @file gesture_inference.c
+ * @brief 手势模型的初始化、同步推理及预览服务回调。
+ * 激活区分布在片内和外部 SRAM；须在 FSMC 初始化和 SRAM 自检之后调用。
+ */
 #include "gesture_inference.h"
 
 #include "main.h"
 #include "network.h"
+#include "stai_events.h"
 #include "sram_layout.h"
 #include <stddef.h>
 #include <string.h>
@@ -11,10 +16,26 @@
 #error "Generated model does not match the application memory/output contract"
 #endif
 
+/* 网络上下文与第一激活区常驻片内；第二激活区使用固定的外部 SRAM 区域。 */
 STAI_NETWORK_CONTEXT_DECLARE(gesture_network, STAI_NETWORK_CONTEXT_SIZE)
 STAI_ALIGNED(32)
 static uint8_t gesture_activations[STAI_NETWORK_ACTIVATION_1_SIZE_BYTES];
 static uint8_t gesture_ready;
+static void (*gesture_service)(void);
+
+static void GestureInference_ServiceCallback(void *cookie, stai_event_type event,
+                                             const void *payload)
+{
+    (void)cookie;
+    (void)payload;
+    /* 同步推理节点间在调用线程推进预览，服务函数不能递归调用推理。 */
+    if ((event == STAI_EVENT_NODE_STOP) && (gesture_service != NULL)) gesture_service();
+}
+
+void GestureInference_SetService(void (*service)(void))
+{
+    gesture_service = service;
+}
 
 static stai_return_code GestureInference_Init(void)
 {
@@ -26,6 +47,8 @@ static stai_return_code GestureInference_Init(void)
     status = stai_runtime_init();
     if (status != STAI_SUCCESS) return status;
     status = stai_network_init(gesture_network);
+    if (status != STAI_SUCCESS) return status;
+    status = stai_network_set_callback(gesture_network, GestureInference_ServiceCallback, NULL);
     if (status != STAI_SUCCESS) return status;
     status = stai_network_set_activations(gesture_network, activations,
                                           STAI_NETWORK_ACTIVATIONS_NUM);
@@ -58,8 +81,10 @@ int GestureInference_Run(const int8_t *input, int8_t output[3],
         status = STAI_ERROR_NETWORK_INVALID_IN_PTR;
         goto failed;
     }
+    /* 模型输入可能复用激活区；保留调用方的输入副本用于对照。 */
     memcpy(inputs[0], input, STAI_NETWORK_IN_1_SIZE_BYTES);
 
+    /* 耗时包含节点回调中的预览服务，不是纯模型计算时间。 */
     start = HAL_GetTick();
     status = stai_network_run(gesture_network, STAI_MODE_SYNC);
     *elapsed_ms = HAL_GetTick() - start;

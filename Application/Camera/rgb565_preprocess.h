@@ -1,3 +1,6 @@
+/** @file rgb565_preprocess.h
+ * @brief RGB565 图像转模型 INT8 输入的缓冲区尺寸与接口。
+ */
 #ifndef RGB565_PREPROCESS_H
 #define RGB565_PREPROCESS_H
 

@@ -1,11 +1,11 @@
 /**
  ******************************************************************************
- * @file    camera.c
+ * @file    camera_dcmi.c
  * @brief   DCMI/DMA 摄像头采集适配模块
  *
  * @details
  * 主要功能：
- * 1. 在 RGB565 LCD 与 JPEG SRAM 两种目标之间安全重配 DCMI/DMA。
+ * 1. 为 RGB565 和 JPEG 配置 DCMI，使用同一套 SRAM 采集 DMA。
  * 2. 启动 Snapshot 采集并记录帧结束、DMA 计数和硬件错误。
  * 3. 向上层提供非阻塞采集状态和有效字节数。
  *
@@ -13,18 +13,21 @@
  * Camera Application/JPEG 调用本模块；本模块复用 CubeMX 的 hdcmi 和 hdma_dcmi。
  *
  * 主要接口：
- * Camera_ConfigureRGB565LcdDma()、Camera_ConfigureJpegDma()、
- * Camera_StartRGB565Snapshot()、Camera_StartJPEGCapture()。
+ * Camera_ConfigureSramDma()、Camera_StartRGB565SramSnapshot()、
+ * Camera_StartJPEGCapture()。
  *
  * @note
  * 本模块不修改 DCMI GPIO、DMA Stream/Channel 或 CubeMX 静态配置来源。
  ******************************************************************************
  */
 
-#include "camera.h"
+#include "camera_dcmi.h"
 
 #include "dma.h"
 #include <stdio.h>
+
+#define CAMERA_JPEG_FRAME_TIMEOUT_MS   3000U
+#define CAMERA_DMA_STOP_IRQ_POLLS      1024U
 
 extern DMA_HandleTypeDef hdma_dcmi;
 
@@ -38,12 +41,6 @@ static volatile uint32_t camera_frame_dcmi_error;
 static volatile uint32_t camera_frame_dma_error;
 static uint32_t camera_buffer_word_count;
 static uint32_t camera_capture_start_tick;
-static uint32_t camera_first_progress_tick;
-static volatile uint32_t camera_frame_tick;
-static uint8_t camera_first_progress_seen;
-
-static HAL_StatusTypeDef Camera_ConfigureDma(uint32_t memory_increment,
-                                             uint32_t memory_alignment);
 
 void Camera_Init(void)
 {
@@ -56,18 +53,29 @@ void Camera_Init(void)
     camera_frame_dcmi_error = HAL_DCMI_ERROR_NONE;
     camera_frame_dma_error = HAL_DMA_ERROR_NONE;
     camera_buffer_word_count = 0U;
-    camera_first_progress_seen = 0U;
-    camera_frame_tick = 0U;
+}
+
+static HAL_StatusTypeDef Camera_StopCapture(void)
+{
+    HAL_StatusTypeDef status;
+
+    __HAL_DCMI_DISABLE_IT(&hdcmi, DCMI_IT_FRAME | DCMI_IT_ERR | DCMI_IT_OVR |
+                         DCMI_IT_LINE | DCMI_IT_VSYNC);
+    status = HAL_DCMI_Stop(&hdcmi);
+    /* HAL_DCMI_Stop 不向上传递其内部 HAL_DMA_Abort 的结果。 */
+    if ((status == HAL_OK) &&
+        (((hdma_dcmi.Instance->CR & DMA_SxCR_EN) != 0U) ||
+         (HAL_DMA_GetError(&hdma_dcmi) == HAL_DMA_ERROR_TIMEOUT)))
+    {
+        return HAL_TIMEOUT;
+    }
+    return status;
 }
 
 HAL_StatusTypeDef Camera_Stop(void)
 {
-    HAL_StatusTypeDef status;
-
-    __HAL_DCMI_DISABLE_IT(&hdcmi, DCMI_IT_FRAME);
-    status = HAL_DCMI_Stop(&hdcmi);
-    Camera_Init();
-
+    HAL_StatusTypeDef status = Camera_StopCapture();
+    if (status == HAL_OK) Camera_Init();
     return status;
 }
 
@@ -94,23 +102,18 @@ HAL_StatusTypeDef Camera_SetDCMIJPEGMode(uint32_t jpeg_mode)
     return HAL_DCMI_Init(&hdcmi);
 }
 
-HAL_StatusTypeDef Camera_ConfigureRGB565LcdDma(void)
+HAL_StatusTypeDef Camera_ConfigureSramDma(void)
 {
-    /* LCD GRAM 是固定写端口：目标地址不递增，按 RGB565 半字宽度写入。 */
-    return Camera_ConfigureDma(DMA_MINC_DISABLE,
-                               DMA_MDATAALIGN_HALFWORD);
-}
+    if ((hdcmi.State == HAL_DCMI_STATE_BUSY) ||
+        (hdma_dcmi.State == HAL_DMA_STATE_BUSY) ||
+        ((hdma_dcmi.Instance->CR & DMA_SxCR_EN) != 0U))
+    {
+        return HAL_BUSY;
+    }
 
-HAL_StatusTypeDef Camera_ConfigureJpegDma(void)
-{
-    /* JPEG 是连续字节流：目标地址必须递增，并以 Word 对齐写入 SRAM。 */
-    return Camera_ConfigureDma(DMA_MINC_ENABLE,
-                               DMA_MDATAALIGN_WORD);
-}
-
-HAL_StatusTypeDef Camera_ConfigureRGB565SramDma(void)
-{
-    return Camera_ConfigureDma(DMA_MINC_ENABLE, DMA_MDATAALIGN_WORD);
+    /* 清理上一模式的 DMA 状态和回调，沿用 CubeMX 初始化的参数。 */
+    if (HAL_DMA_DeInit(&hdma_dcmi) != HAL_OK) return HAL_ERROR;
+    return HAL_DMA_Init(&hdma_dcmi);
 }
 
 HAL_StatusTypeDef Camera_StartRGB565SramSnapshot(uint32_t destination,
@@ -131,40 +134,10 @@ HAL_StatusTypeDef Camera_StartRGB565SramSnapshot(uint32_t destination,
 
     __HAL_DCMI_CLEAR_FLAG(&hdcmi, DCMI_FLAG_FRAMERI | DCMI_FLAG_OVRRI |
                           DCMI_FLAG_ERRRI);
+    /* HAL 在 Snapshot 帧中断中关闭错误中断；连续重启时需重新启用。 */
+    __HAL_DCMI_ENABLE_IT(&hdcmi, DCMI_IT_ERR | DCMI_IT_OVR);
     return HAL_DCMI_Start_DMA(&hdcmi, DCMI_MODE_SNAPSHOT,
                               destination, word_count);
-}
-
-/**
- * @brief  启动一帧 RGB565 到 LCD GRAM 的 Snapshot
- * @note   Snapshot 在一帧后自动结束；上层收到帧事件后重新设置 LCD 窗口，
- *         再启动下一帧，从而保持 LCD 内部 GRAM 写指针与画面同步。
- */
-HAL_StatusTypeDef Camera_StartRGB565Snapshot(uint32_t destination,
-                                             uint32_t word_count)
-{
-    if ((destination == 0U) || (word_count == 0U))
-    {
-        return HAL_ERROR;
-    }
-
-    if ((hdcmi.Init.JPEGMode != DCMI_JPEG_DISABLE) ||
-        (hdma_dcmi.Init.Mode != DMA_NORMAL) ||
-        (hdma_dcmi.Init.PeriphDataAlignment != DMA_PDATAALIGN_WORD) ||
-        (hdma_dcmi.Init.MemDataAlignment != DMA_MDATAALIGN_HALFWORD) ||
-        (hdma_dcmi.Init.MemInc != DMA_MINC_DISABLE))
-    {
-        return HAL_ERROR;
-    }
-
-    __HAL_DCMI_CLEAR_FLAG(&hdcmi,
-                          DCMI_FLAG_FRAMERI | DCMI_FLAG_OVRRI |
-                          DCMI_FLAG_ERRRI);
-
-    return HAL_DCMI_Start_DMA(&hdcmi,
-                              DCMI_MODE_SNAPSHOT,
-                              destination,
-                              word_count);
 }
 
 Camera_Error_t Camera_StartJPEGCapture(uint8_t *buffer, uint32_t buffer_size)
@@ -208,8 +181,6 @@ Camera_Error_t Camera_StartJPEGCapture(uint8_t *buffer, uint32_t buffer_size)
     camera_frame_dma_ndtr = camera_buffer_word_count;
     camera_frame_dcmi_error = HAL_DCMI_ERROR_NONE;
     camera_frame_dma_error = HAL_DMA_ERROR_NONE;
-    camera_first_progress_seen = 0U;
-    camera_frame_tick = 0U;
     camera_state = CAMERA_CAPTURE_BUSY;
 
     __HAL_DCMI_CLEAR_FLAG(&hdcmi,
@@ -217,13 +188,15 @@ Camera_Error_t Camera_StartJPEGCapture(uint8_t *buffer, uint32_t buffer_size)
                           DCMI_FLAG_ERRRI);
 
     camera_capture_start_tick = HAL_GetTick();
+    /* Snapshot 帧结束后 HAL 会关闭 ERR/OVR，每帧开始前恢复。 */
+    __HAL_DCMI_ENABLE_IT(&hdcmi, DCMI_IT_ERR | DCMI_IT_OVR);
     hal_status = HAL_DCMI_Start_DMA(&hdcmi,
                                     DCMI_MODE_SNAPSHOT,
                                     (uint32_t)buffer,
                                     camera_buffer_word_count);
     if (hal_status != HAL_OK)
     {
-        camera_error = CAMERA_ERROR_START;
+        camera_error = (Camera_StopCapture() == HAL_OK) ? CAMERA_ERROR_START : CAMERA_ERROR_STOP;
         camera_state = CAMERA_CAPTURE_ERROR;
         return camera_error;
     }
@@ -236,42 +209,50 @@ Camera_Error_t Camera_StartJPEGCapture(uint8_t *buffer, uint32_t buffer_size)
 
 void Camera_Process(void)
 {
-    HAL_StatusTypeDef stop_status;
-
-    /* 主循环首次观察到 DMA 计数变化；这是受轮询延迟影响的近似时刻。 */
-    if ((camera_state == CAMERA_CAPTURE_BUSY) &&
-        (camera_first_progress_seen == 0U) && (camera_frame_pending == 0U) &&
-        (camera_error_pending == 0U) &&
-        (__HAL_DMA_GET_COUNTER(&hdma_dcmi) < camera_buffer_word_count))
-    {
-        camera_first_progress_tick = HAL_GetTick();
-        camera_first_progress_seen = 1U;
-    }
-
     /*
      * JPEG 长度由帧结束时的 NDTR 推导；若 NDTR 先变为 0，说明缓存已写满，
      * 应报告溢出而不是把不完整数据交给上层解析。
      */
-    if ((camera_state == CAMERA_CAPTURE_BUSY) &&
-        (camera_frame_pending == 0U) &&
-        (__HAL_DMA_GET_COUNTER(&hdma_dcmi) == 0U))
+    if ((camera_state == CAMERA_CAPTURE_BUSY) && (camera_frame_pending == 0U) &&
+        (camera_error_pending == 0U))
     {
-        camera_error = CAMERA_ERROR_BUFFER_OVERFLOW;
-        camera_error_pending = 1U;
+        Camera_Error_t error = CAMERA_ERROR_NONE;
+        if (__HAL_DMA_GET_COUNTER(&hdma_dcmi) == 0U)
+            error = CAMERA_ERROR_BUFFER_OVERFLOW;
+        else if ((HAL_GetTick() - camera_capture_start_tick) >= CAMERA_JPEG_FRAME_TIMEOUT_MS)
+            error = CAMERA_ERROR_FRAME_TIMEOUT;
+
+        if (error != CAMERA_ERROR_NONE)
+        {
+            uint32_t primask = __get_PRIMASK();
+            __disable_irq();
+            /* 如果判断期间已收到帧或错误事件，保留中断记录。 */
+            if ((camera_frame_pending == 0U) && (camera_error_pending == 0U))
+            {
+                camera_frame_dma_ndtr = __HAL_DMA_GET_COUNTER(&hdma_dcmi);
+                camera_frame_dcmi_error = HAL_DCMI_GetError(&hdcmi);
+                camera_frame_dma_error = HAL_DMA_GetError(&hdma_dcmi);
+                camera_error = error;
+                camera_error_pending = 1U;
+            }
+            __set_PRIMASK(primask);
+        }
     }
 
     if (camera_error_pending != 0U)
     {
-        camera_error_pending = 0U;
-        (void)HAL_DCMI_Stop(&hdcmi);
         camera_state = CAMERA_CAPTURE_ERROR;
+        camera_error_pending = 0U;
+        camera_frame_pending = 0U;
+        if (Camera_StopCapture() != HAL_OK) camera_error = CAMERA_ERROR_STOP;
         return;
     }
 
     if (camera_frame_pending != 0U)
     {
+        HAL_StatusTypeDef stop_status;
         camera_frame_pending = 0U;
-        stop_status = HAL_DCMI_Stop(&hdcmi);
+        stop_status = Camera_StopCapture();
 #if (DEBUG_VERBOSE == 1)
         printf("[DCMI] Frame Event\r\n");
         printf("[DMA] NDTR: %lu\r\n",
@@ -286,6 +267,18 @@ void Camera_Process(void)
         if (stop_status != HAL_OK)
         {
             camera_error = CAMERA_ERROR_STOP;
+            camera_state = CAMERA_CAPTURE_ERROR;
+        }
+        else if (camera_error_pending != 0U)
+        {
+            camera_error_pending = 0U;
+            camera_state = CAMERA_CAPTURE_ERROR;
+        }
+        else if ((camera_frame_dcmi_error != HAL_DCMI_ERROR_NONE) ||
+                 (camera_frame_dma_error != HAL_DMA_ERROR_NONE))
+        {
+            camera_error = (camera_frame_dma_error != HAL_DMA_ERROR_NONE) ?
+                           CAMERA_ERROR_DMA : CAMERA_ERROR_DCMI;
             camera_state = CAMERA_CAPTURE_ERROR;
         }
         else if (camera_captured_size >=
@@ -303,24 +296,32 @@ void Camera_Process(void)
 
 void Camera_NotifyFrameEvent(DCMI_HandleTypeDef *dcmi_handle)
 {
-    uint32_t remaining_words;
-
     /*
      * 帧回调立即停用 DMA 并保存 NDTR 快照，防止可变长 JPEG 帧结束后继续写入。
      * HAL_DCMI_Stop() 和错误打印仍由 Camera_Process() 在主循环完成。
      */
     if ((dcmi_handle == &hdcmi) &&
-        (camera_state == CAMERA_CAPTURE_BUSY))
+        (camera_state == CAMERA_CAPTURE_BUSY) && (camera_error_pending == 0U))
     {
-        camera_frame_tick = HAL_GetTick();
+        uint32_t polls = CAMERA_DMA_STOP_IRQ_POLLS;
+        uint32_t remaining_words;
+
         __HAL_DMA_DISABLE(&hdma_dcmi);
-        while ((hdma_dcmi.Instance->CR & DMA_SxCR_EN) != 0U)
+        /* 中断优先级高于 SysTick，使用有限次数轮询。 */
+        while (((hdma_dcmi.Instance->CR & DMA_SxCR_EN) != 0U) && (polls != 0U))
         {
+            polls--;
         }
         remaining_words = __HAL_DMA_GET_COUNTER(&hdma_dcmi);
         camera_frame_dma_ndtr = remaining_words;
         camera_frame_dcmi_error = HAL_DCMI_GetError(dcmi_handle);
         camera_frame_dma_error = HAL_DMA_GetError(&hdma_dcmi);
+        if ((hdma_dcmi.Instance->CR & DMA_SxCR_EN) != 0U)
+        {
+            camera_error = CAMERA_ERROR_DMA_STOP_TIMEOUT;
+            camera_error_pending = 1U;
+            return;
+        }
         camera_captured_size =
             (camera_buffer_word_count - remaining_words) * sizeof(uint32_t);
         camera_frame_pending = 1U;
@@ -379,51 +380,4 @@ uint32_t Camera_GetDcmiErrorSnapshot(void)
 uint32_t Camera_GetDmaRemainingSnapshot(void)
 {
     return camera_frame_dma_ndtr;
-}
-
-int32_t Camera_GetFirstDmaProgressMs(void)
-{
-    return (camera_first_progress_seen != 0U) ?
-           (int32_t)(camera_first_progress_tick - camera_capture_start_tick) : -1;
-}
-
-int32_t Camera_GetDmaProgressToFrameMs(void)
-{
-    int32_t elapsed = (int32_t)(camera_frame_tick - camera_first_progress_tick);
-    return ((camera_first_progress_seen != 0U) && (elapsed >= 0)) ? elapsed : -1;
-}
-
-static HAL_StatusTypeDef Camera_ConfigureDma(uint32_t memory_increment,
-                                             uint32_t memory_alignment)
-{
-    if ((hdcmi.State == HAL_DCMI_STATE_BUSY) ||
-        (hdma_dcmi.State == HAL_DMA_STATE_BUSY))
-    {
-        return HAL_BUSY;
-    }
-
-    /*
-     * RGB565 与 JPEG 的目标递增和数据宽度不同，必须完整 DeInit/Init；
-     * 只改目标地址会遗留上一模式的 DMA 参数并造成花屏或缓存覆盖。
-     */
-    if (HAL_DMA_DeInit(&hdma_dcmi) != HAL_OK)
-    {
-        return HAL_ERROR;
-    }
-
-    hdma_dcmi.Instance = DMA2_Stream1;
-    hdma_dcmi.Init.Channel = DMA_CHANNEL_1;
-    hdma_dcmi.Init.Direction = DMA_PERIPH_TO_MEMORY;
-    hdma_dcmi.Init.PeriphInc = DMA_PINC_DISABLE;
-    hdma_dcmi.Init.MemInc = memory_increment;
-    hdma_dcmi.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
-    hdma_dcmi.Init.MemDataAlignment = memory_alignment;
-    hdma_dcmi.Init.Mode = DMA_NORMAL;
-    hdma_dcmi.Init.Priority = DMA_PRIORITY_VERY_HIGH;
-    hdma_dcmi.Init.FIFOMode = DMA_FIFOMODE_ENABLE;
-    hdma_dcmi.Init.FIFOThreshold = DMA_FIFO_THRESHOLD_HALFFULL;
-    hdma_dcmi.Init.MemBurst = DMA_MBURST_SINGLE;
-    hdma_dcmi.Init.PeriphBurst = DMA_PBURST_SINGLE;
-
-    return HAL_DMA_Init(&hdma_dcmi);
 }

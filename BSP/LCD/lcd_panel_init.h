@@ -1,5 +1,8 @@
-﻿#ifndef __LCD_EX_H
-#define __LCD_EX_H
+﻿/** @file lcd_panel_init.h
+ * @brief 各 LCD 控制器的寄存器初始化入口，由 lcd.c 根据识别结果调用。
+ */
+#ifndef BSP_LCD_PANEL_INIT_H
+#define BSP_LCD_PANEL_INIT_H
 
 #include "lcd.h"
 

@@ -1,4 +1,5 @@
 """接收 USART1 单帧及板端量化结果，与 Pillow 参考预处理比较。"""
+# 调试协议依赖板端单帧验证入口；当前双模式主流程没有接入该入口。
 import argparse
 import time
 from pathlib import Path
@@ -55,6 +56,7 @@ def main():
             raise ValueError(f'帧头错误: {header!r}')
         payload = read_exact(port, FRAME_BYTES + TENSOR_BYTES + 4, 90)
     data, trailer = payload[:-4], payload[-4:]
+    # 与板端一致，FNV-1a 覆盖原始帧及量化输入，不包含帧头和校验尾。
     checksum = 2166136261
     for byte in data:
         checksum = ((checksum ^ byte) * 16777619) & 0xffffffff

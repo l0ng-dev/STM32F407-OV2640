@@ -2,6 +2,7 @@
  * @brief 外部 SRAM 上电读写自检；执行时覆盖整个器件。
  */
 #include "sram_test.h"
+#include "sram_layout.h"
 #include <stdio.h>
 
 static uint8_t sram_test_passed;
@@ -11,9 +12,9 @@ static uint32_t sram_failure_stage;
 /* 上电后覆盖整个外部 SRAM，仅用于当前阶段的读写验证。 */
 void SRAM_Test(void)
 {
-  volatile uint32_t * const words = (volatile uint32_t *)0x68000000UL;
-  volatile uint8_t * const bytes = (volatile uint8_t *)0x68000000UL;
-  const uint32_t word_count = (1024UL * 1024UL) / sizeof(uint32_t);
+  volatile uint32_t * const words = (volatile uint32_t *)SRAM_LAYOUT_BASE;
+  volatile uint8_t * const bytes = (volatile uint8_t *)SRAM_LAYOUT_BASE;
+  const uint32_t word_count = SRAM_LAYOUT_SIZE / sizeof(uint32_t);
   uint32_t i;
   uint32_t expected;
   uint32_t actual;
@@ -35,11 +36,11 @@ void SRAM_Test(void)
       if (actual != expected)
       {
         sram_failure_stage = pass + 1U;
-        sram_failure_address = 0x68000000UL + i * 4UL;
+        sram_failure_address = SRAM_LAYOUT_BASE + i * sizeof(uint32_t);
         sram_failure_expected = expected;
         sram_failure_actual = actual;
         printf("[SRAM] FAIL pass=%lu addr=0x%08lX expected=0x%08lX actual=0x%08lX\r\n",
-               (unsigned long)pass, (unsigned long)(0x68000000UL + i * 4UL),
+               (unsigned long)pass, (unsigned long)sram_failure_address,
                (unsigned long)expected, (unsigned long)actual);
         sram_test_passed = 0U;
         return;
@@ -54,7 +55,7 @@ void SRAM_Test(void)
   if (actual != 0xA53412C3UL)
   {
     sram_failure_stage = 3U;
-    sram_failure_address = 0x68000000UL;
+    sram_failure_address = SRAM_LAYOUT_BASE;
     sram_failure_expected = 0xA53412C3UL;
     sram_failure_actual = actual;
     printf("[SRAM] FAIL byte lanes actual=0x%08lX\r\n", (unsigned long)actual);

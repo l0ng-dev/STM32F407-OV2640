@@ -440,11 +440,6 @@
               <FilePath>../Core/Src/fsmc.c</FilePath>
             </File>
             <File>
-              <FileName>tim.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Core/Src/tim.c</FilePath>
-            </File>
-            <File>
               <FileName>usart.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/usart.c</FilePath>
@@ -565,16 +560,6 @@
               <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pccard.c</FilePath>
             </File>
             <File>
-              <FileName>stm32f4xx_hal_tim.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32f4xx_hal_tim_ex.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim_ex.c</FilePath>
-            </File>
-            <File>
               <FileName>stm32f4xx_hal_uart.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_uart.c</FilePath>
@@ -600,9 +585,9 @@
               <FilePath>..\BSP\LCD\lcd.c</FilePath>
             </File>
             <File>
-              <FileName>lcd_ex.c</FileName>
+              <FileName>lcd_panel_init.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\BSP\LCD\lcd_ex.c</FilePath>
+              <FilePath>..\BSP\LCD\lcd_panel_init.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -630,9 +615,9 @@
           <GroupName>BSP/Camera</GroupName>
           <Files>
             <File>
-              <FileName>camera.c</FileName>
+              <FileName>camera_dcmi.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\BSP\Camera\camera.c</FilePath>
+              <FilePath>..\BSP\Camera\camera_dcmi.c</FilePath>
             </File>
           </Files>
         </Group>

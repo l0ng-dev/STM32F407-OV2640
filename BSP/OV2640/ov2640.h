@@ -102,13 +102,6 @@ SCCB_Status_t OV2640_SetJPEGMode(void);
  */
 SCCB_Status_t OV2640_SetOutputSize(uint16_t width, uint16_t height);
 
-/**
- * @brief  回读并输出 OV2640 JPEG 模式相关寄存器
- * @note   依次读取 DSP Bank、Sensor Bank，结束时恢复到 DSP Bank
- * @retval SCCB 操作状态
- */
-SCCB_Status_t OV2640_Debug_ReadMode(void);
-
 #ifdef __cplusplus
 }
 #endif

@@ -1,5 +1,5 @@
 /** @file vofa.c
- * @brief USART2 FireWater 图片和有界日志队列；不在中断中发送。
+ * @brief USART2 FireWater 图片及 USART1 有界日志队列；不在中断中发送。
  */
 #include "vofa.h"
 #include "usart.h"
@@ -7,6 +7,7 @@
 
 #define VOFA_CHUNK_SIZE 1024U
 #define VOFA_TIMEOUT_MS 100U
+#define LOG_TIMEOUT_MS 100U
 #define VOFA_JPEG_FORMAT 27U
 #define LOG_LINE_CAPACITY 128U
 #define LOG_QUEUE_CAPACITY 12U
@@ -21,7 +22,7 @@ static uint32_t log_dropped;
 static uint8_t image_active;
 static uint8_t stream_fault;
 
-/* 串口输出只允许在主循环中执行；失败后锁定流，避免破坏接收端帧边界。 */
+/* 图片串口只在主循环中发送；失败后锁定图片流，避免破坏接收端帧边界。 */
 static uint8_t Vofa_Write(const uint8_t *data, uint16_t length)
 {
     if (stream_fault != 0U) return 0U;
@@ -45,6 +46,7 @@ Vofa_TxResult Vofa_SendJpegChunk(const uint8_t *data, uint32_t size,
         return VOFA_TX_ERROR;
     }
 
+    /* 图片头声明完整长度；整包结束前不能插入另一张图片。 */
     if (*offset == 0U)
     {
         char header[48];
@@ -72,13 +74,6 @@ Vofa_TxResult Vofa_SendJpegChunk(const uint8_t *data, uint32_t size,
     return VOFA_TX_DONE;
 }
 
-uint8_t Vofa_SendLine(const char *line, uint16_t length)
-{
-    if ((image_active != 0U) || (line == NULL) || (length == 0U) ||
-        (line[length - 1U] != '\n')) return 0U;
-    return Vofa_Write((const uint8_t *)line, length);
-}
-
 uint8_t Vofa_IsFaulted(void)
 {
     return stream_fault;
@@ -91,11 +86,14 @@ int fputc(int ch, FILE *stream)
     if (ch == '\r') return ch;
     if (ch != '\n')
     {
-        if (log_line_length < LOG_LINE_CAPACITY - 2U) log_line[log_line_length++] = (char)ch;
+        /* 为截断标记和 CRLF 保留三个字节。 */
+        if (log_line_length < LOG_LINE_CAPACITY - 3U) log_line[log_line_length++] = (char)ch;
         else log_line_truncated = 1U;
         return ch;
     }
+    /* 长行以 ~ 标记截断；队列满时丢弃整行并在空闲后报告数量。 */
     if (log_line_truncated != 0U) log_line[log_line_length++] = '~';
+    log_line[log_line_length++] = '\r';
     log_line[log_line_length++] = '\n';
     if (log_count < LOG_QUEUE_CAPACITY)
     {
@@ -113,18 +111,21 @@ int fputc(int ch, FILE *stream)
 
 void Vofa_Process(void)
 {
-    if ((image_active != 0U) || (stream_fault != 0U)) return;
+    /* 日志独立走 USART1，不受 USART2 图片发送或锁定状态影响。 */
     if (log_count != 0U)
     {
-        if (Vofa_Write((const uint8_t *)log_queue[log_tail], log_lengths[log_tail]) == 0U) return;
+        if (HAL_UART_Transmit(&huart1, (const uint8_t *)log_queue[log_tail],
+                              log_lengths[log_tail], LOG_TIMEOUT_MS) != HAL_OK)
+            log_dropped++;
         log_tail = (uint8_t)((log_tail + 1U) % LOG_QUEUE_CAPACITY);
         log_count--;
     }
     else if (log_dropped != 0U)
     {
         char message[48];
-        int n = snprintf(message, sizeof(message), "diag logs dropped %lu\n", (unsigned long)log_dropped);
+        int n = snprintf(message, sizeof(message), "diag logs dropped %lu\r\n", (unsigned long)log_dropped);
         if ((n > 0) && ((size_t)n < sizeof(message)) &&
-            (Vofa_Write((const uint8_t *)message, (uint16_t)n) != 0U)) log_dropped = 0U;
+            (HAL_UART_Transmit(&huart1, (const uint8_t *)message, (uint16_t)n,
+                               LOG_TIMEOUT_MS) == HAL_OK)) log_dropped = 0U;
     }
 }

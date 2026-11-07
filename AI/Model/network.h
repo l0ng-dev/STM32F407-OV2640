@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    network.h
   * @author  AST Embedded Analytics Research Platform
-  * @date    2026-11-05T18:27:58+0800
+  * @date    2026-11-07T17:23:53+0800
   * @brief   ST.AI Tool Automatic Code Generator for Embedded NN computing
   ******************************************************************************
   * @attention
@@ -23,12 +23,12 @@
 
 /*****************************************************************************/
 /*  Original model name and signature  */
-#define STAI_NETWORK_ORIGIN_MODEL_NAME         "shufflenet_v2_x0_5_int8_qdq"
-#define STAI_NETWORK_ORIGIN_MODEL_SIGNATURE    "0x880b1d9db45287639240f46f4c19d9f4"
+#define STAI_NETWORK_ORIGIN_MODEL_NAME         "model_qdq"
+#define STAI_NETWORK_ORIGIN_MODEL_SIGNATURE    "0xda673b932a4b9c8a17ddadc2e88ea2d9"
 
 /*  Generated model name and signature  */
 #define STAI_NETWORK_MODEL_NAME                "network"
-#define STAI_NETWORK_MODEL_SIGNATURE           (0x04897ae3f3e9f887)
+#define STAI_NETWORK_MODEL_SIGNATURE           (0xd0c14e8a9d05f713)
 
 
 /*****************************************************************************/
@@ -100,8 +100,8 @@
 #define STAI_NETWORK_OUT_1_RANK        (1)
 #define STAI_NETWORK_OUT_1_SIZE        ((3))
 #define STAI_NETWORK_OUT_1_SIZE_BYTES  (3)
-#define STAI_NETWORK_OUT_1_SCALE       (0.012564831413328648f)
-#define STAI_NETWORK_OUT_1_ZERO_POINT  (48)
+#define STAI_NETWORK_OUT_1_SCALE       (0.010541616939008236f)
+#define STAI_NETWORK_OUT_1_ZERO_POINT  (28)
 
 /*****************************************************************************/
 /*  Macros to declare activations buffers characteristics  */

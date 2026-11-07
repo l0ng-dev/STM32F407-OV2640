@@ -1,5 +1,6 @@
 /** @file camera_validation.c
  * @brief USART1 单帧导出、输入回放及板端/电脑端推理对照。
+ * 当前主流程未接入；调用前须确保帧缓冲不再被采集或显示改写。
  */
 #include "camera_validation.h"
 #include "gesture_inference.h"
@@ -76,6 +77,7 @@ static void CameraValidation_ExportInference(uint8_t use_host_input)
     uint8_t trailer[4];
     uint32_t elapsed, error, checksum = 2166136261UL;
 
+    /* T 命令先握手再接收并校验主机张量；I 命令使用当前帧预处理。 */
     if (use_host_input != 0U)
     {
         uint32_t offset = 0U, host_checksum = 2166136261UL, i;
@@ -114,6 +116,7 @@ static void CameraValidation_ExportInference(uint8_t use_host_input)
         printf("[AI] inference failed 0x%08lX\r\n", (unsigned long)error);
         return;
     }
+    /* 返回三个 INT8 原始输出和小端毫秒数；FNV 覆盖张量及此负载。 */
     payload[0] = (uint8_t)output[0];
     payload[1] = (uint8_t)output[1];
     payload[2] = (uint8_t)output[2];

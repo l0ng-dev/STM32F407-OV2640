@@ -177,7 +177,7 @@ void lcd_wr_data(volatile uint16_t data);                                       
 void lcd_wr_regno(volatile uint16_t regno);                                                                             /* LCD写寄存器编号或地址 */
 void lcd_write_reg(uint16_t regno, uint16_t data);                                                                      /* LCD写寄存器 */
 
-void lcd_init(void);                                                                                                    /* 初始化LCD */
+uint8_t lcd_init(void);                                                                                                 /* 初始化 LCD，成功返回 1，背光保持关闭 */
 
 void lcd_delay_us(uint32_t us);                                                                                       /* LCD微秒延时 */
 void lcd_display_on(void);                                                                                              /* LCD开启显示 */
@@ -205,6 +205,8 @@ void lcd_show_char(uint16_t x, uint16_t y, char chr, uint8_t size, uint8_t mode,
 void lcd_show_num(uint16_t x, uint16_t y, uint32_t num, uint8_t len, uint8_t size, uint16_t color);                     /* 显示len个数字 */
 void lcd_show_xnum(uint16_t x, uint16_t y, uint32_t num, uint8_t len, uint8_t size, uint8_t mode, uint16_t color);      /* 扩展显示len个数字（显示高位0） */
 void lcd_show_string(uint16_t x, uint16_t y, uint16_t width, uint16_t height, uint8_t size, char *p, uint16_t color);   /* 显示字符串 */
+/* 单行 16 像素高，支持 ASCII 与 lcd_font_zh.h 中的 UTF-8 汉字。 */
+void lcd_show_utf8_16(uint16_t x, uint16_t y, const char *text, uint16_t color);
 
 
 #endif

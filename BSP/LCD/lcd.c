@@ -36,7 +36,8 @@
 #include "main.h"
 #include "fsmc.h"
 #include "lcd.h"
-#include "lcd_ex.h"
+#include "lcd_panel_init.h"
+#include "lcd_font_zh.h"
 #include "lcdfont.h"
 
 /* 绘制LCD时的背景色 */
@@ -923,35 +924,38 @@ void lcd_fill_circle(uint16_t x, uint16_t y, uint16_t r, uint16_t color)
 void lcd_show_char(uint16_t x, uint16_t y, char chr, uint8_t size, uint8_t mode, uint16_t color)
 {
     uint8_t csize;
-    uint8_t *pfont;
+    const uint8_t *pfont;
+    uint8_t ascii = (uint8_t)chr;
+    uint8_t glyph;
     uint16_t y0;
     uint8_t t;
     uint8_t t1;
     uint8_t temp;
     
+    if ((ascii < ' ') || (ascii > '~')) return;
+    glyph = (uint8_t)(ascii - ' ');
     csize = ((size >> 3) + (((size & 0x7) != 0) ? 1 : 0)) * (size >> 1);    /* 计算所选字体对应一个字符所占的字节数 */
-    chr -= ' ';                                                             /* 计算偏移后的值，因为字库是从空格开始的 */
     
     switch (size)
     {
         case 12:                                                            /* 12*12 ASCII字符 */
         {
-            pfont = (uint8_t *)asc2_1206[chr];
+            pfont = asc2_1206[glyph];
             break;
         }
         case 16:                                                            /* 16*16 ASCII字符 */
         {
-            pfont = (uint8_t *)asc2_1608[chr];
+            pfont = asc2_1608[glyph];
             break;
         }
         case 24:                                                            /* 24*24 ASCII字符 */
         {
-            pfont = (uint8_t *)asc2_2412[chr];
+            pfont = asc2_2412[glyph];
             break;
         }
         case 32:                                                            /* 32*32 ASCII字符 */
         {
-            pfont = (uint8_t *)asc2_3216[chr];
+            pfont = asc2_3216[glyph];
             break;
         }
         default:
@@ -1144,6 +1148,63 @@ void lcd_show_string(uint16_t x, uint16_t y, uint16_t width, uint16_t height, ui
     }
 }
 
+static void lcd_show_zh_glyph16(uint16_t x, uint16_t y, uint16_t codepoint, uint16_t color)
+{
+    size_t i;
+    for (i = 0U; i < sizeof(lcd_font_zh16) / sizeof(lcd_font_zh16[0]); ++i)
+    {
+        if (lcd_font_zh16[i].codepoint == codepoint)
+        {
+            uint16_t row;
+            for (row = 0U; row < 16U; ++row)
+            {
+                uint16_t bits = lcd_font_zh16[i].rows[row];
+                uint16_t mask;
+                lcd_set_cursor(x, y + row);
+                lcd_write_ram_prepare();
+                for (mask = 0x8000U; mask != 0U; mask >>= 1U)
+                {
+                    LCD->LCD_RAM = ((bits & mask) != 0U) ? color : (uint16_t)g_back_color;
+                }
+            }
+            return;
+        }
+    }
+    lcd_show_char(x + 4U, y, '?', 16U, 0U, color);
+}
+
+void lcd_show_utf8_16(uint16_t x, uint16_t y, const char *text, uint16_t color)
+{
+    const uint8_t *p = (const uint8_t *)text;
+    if ((p == NULL) || (y + 16U > lcddev.height) || (x + 8U > lcddev.width)) return;
+
+    lcd_set_window(0U, 0U, lcddev.width, lcddev.height);
+    while ((*p != 0U) && (x + 8U <= lcddev.width))
+    {
+        uint16_t lead = *p++;
+        if ((lead >= ' ') && (lead <= '~'))
+        {
+            lcd_show_char(x, y, (char)lead, 16U, 0U, color);
+            x += 8U;
+        }
+        else if (((lead & 0xF0U) == 0xE0U) &&
+                 ((p[0] & 0xC0U) == 0x80U) && ((p[1] & 0xC0U) == 0x80U))
+        {
+            uint16_t codepoint = (uint16_t)(((lead & 0x0FU) << 12U) |
+                                           ((p[0] & 0x3FU) << 6U) | (p[1] & 0x3FU));
+            if (x + 16U > lcddev.width) return;
+            lcd_show_zh_glyph16(x, y, codepoint, color);
+            p += 2;
+            x += 16U;
+        }
+        else
+        {
+            lcd_show_char(x, y, '?', 16U, 0U, color);
+            x += 8U;
+        }
+    }
+}
+
 /**
  * @brief       LCD初始化完成后优化FSMC异步写时序
  * @note        ID读取和控制器寄存器初始化仍使用CubeMX配置的保守时序。
@@ -1182,9 +1243,10 @@ static void lcd_fsmc_write_timing_optimize(void)
 /**
  * @brief   初始化LCD
  * @param   无
- * @retval  无
+ * @retval  1：识别并初始化成功；0：控制器 ID 未识别
+ * @note    调用方绘制首屏后再打开背光。
  */
-void lcd_init(void)
+uint8_t lcd_init(void)
 {
     GPIO_InitTypeDef gpio_init_struct;
     /* 使能时钟 */
@@ -1196,6 +1258,7 @@ void lcd_init(void)
     gpio_init_struct.Pull = GPIO_PULLUP;
     gpio_init_struct.Speed = GPIO_SPEED_FREQ_HIGH;
     HAL_GPIO_Init(LCD_BL_GPIO_PORT, &gpio_init_struct);
+    LCD_BL(0);
     
 
     HAL_Delay(50);
@@ -1312,11 +1375,14 @@ void lcd_init(void)
         lcd_ex_ssd1963_reginit();   /* 执行SSD1963初始化 */
         lcd_ssd_backlight_set(100); /* 背光设置为最亮 */
     }
+    else
+    {
+        return 0U;
+    }
     
     lcd_fsmc_write_timing_optimize();
     lcd_display_dir(0);                                                                     /* 默认设置为竖屏 */
-    LCD_BL(1);                                                                              /* 点亮背光 */
-    lcd_clear(WHITE);                                                                       /* 清屏 */
+    return 1U;
 }
 
 /**

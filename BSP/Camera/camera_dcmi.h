@@ -1,12 +1,12 @@
 /**
  ******************************************************************************
- * @file    camera.h
+ * @file    camera_dcmi.h
  * @brief   DCMI/DMA 摄像头采集接口
  *
  * @details
  * 主要功能：
  * 1. 定义底层采集状态和错误码。
- * 2. 提供 RGB565 LCD 与 JPEG Buffer 的 DMA 配置和 Snapshot 接口。
+ * 2. 提供 RGB565 与 JPEG 写入外部 SRAM 的 DMA 配置和 Snapshot 接口。
  * 3. 接收统一 DCMI 回调转发并提供采集结果查询。
  *
  * 模块关系：
@@ -20,8 +20,8 @@
  ******************************************************************************
  */
 
-#ifndef BSP_CAMERA_H
-#define BSP_CAMERA_H
+#ifndef BSP_CAMERA_DCMI_H
+#define BSP_CAMERA_DCMI_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,19 +51,18 @@ typedef enum
     CAMERA_ERROR_BUFFER_OVERFLOW,
     CAMERA_ERROR_DCMI,
     CAMERA_ERROR_DMA,
-    CAMERA_ERROR_STOP
+    CAMERA_ERROR_STOP,
+    CAMERA_ERROR_FRAME_TIMEOUT,
+    CAMERA_ERROR_DMA_STOP_TIMEOUT
 } Camera_Error_t;
 
 void Camera_Init(void);
+/* 停止 DCMI 并确认采集 DMA 停止；成功后重置本模块采集状态。 */
 HAL_StatusTypeDef Camera_Stop(void);
 HAL_StatusTypeDef Camera_SetDCMIJPEGMode(uint32_t jpeg_mode);
-HAL_StatusTypeDef Camera_ConfigureRGB565LcdDma(void);
-HAL_StatusTypeDef Camera_ConfigureJpegDma(void);
-HAL_StatusTypeDef Camera_ConfigureRGB565SramDma(void);
+HAL_StatusTypeDef Camera_ConfigureSramDma(void);
 HAL_StatusTypeDef Camera_StartRGB565SramSnapshot(uint32_t destination,
                                                  uint32_t word_count);
-HAL_StatusTypeDef Camera_StartRGB565Snapshot(uint32_t destination,
-                                             uint32_t word_count);
 Camera_Error_t Camera_StartJPEGCapture(uint8_t *buffer, uint32_t buffer_size);
 void Camera_Process(void);
 void Camera_NotifyFrameEvent(DCMI_HandleTypeDef *dcmi_handle);
@@ -74,11 +73,9 @@ uint32_t Camera_GetCapturedSize(void);
 uint32_t Camera_GetDmaErrorSnapshot(void);
 uint32_t Camera_GetDcmiErrorSnapshot(void);
 uint32_t Camera_GetDmaRemainingSnapshot(void);
-int32_t Camera_GetFirstDmaProgressMs(void);
-int32_t Camera_GetDmaProgressToFrameMs(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* BSP_CAMERA_H */
+#endif /* BSP_CAMERA_DCMI_H */

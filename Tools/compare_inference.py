@@ -1,4 +1,5 @@
 """请求板端单帧推理，并用同一 INT8 输入与量化 ONNX 对照。"""
+# 调试协议依赖板端单帧验证入口；当前双模式主流程没有接入该入口。
 import argparse
 import hashlib
 import time
@@ -9,10 +10,10 @@ import onnxruntime as ort
 import serial
 
 INPUT_BYTES = 3 * 160 * 160
-MODEL_SHA256 = '994428cdddb23caa0b6587114e8b5093915164093dcf5c48f1a561deae11ac6a'
+MODEL_SHA256 = '30a80cd9b0b2649c0f637c99728d6443e9ad88ed68b159c9262bc458c5eaad5c'
 DEFAULT_MODEL = (r'\\wsl.localhost\Ubuntu-24.04\home\leo\projects\model\CNN_Project\F4Camera_Gesture'
-                 r'\real_dataset\runs\p01_pretrained_shuffle05_01\quant_qdq_02_repeat'
-                 r'\shufflenet_v2_x0_5_int8_qdq.onnx')
+                 r'\real_dataset\runs\p01_pretrained_shuffle05_board_three_01\deployment_01'
+                 r'\model_qdq.onnx')
 
 
 def read_exact(port, length, timeout):
@@ -68,9 +69,10 @@ def main():
     quant = np.frombuffer(input_bytes, dtype=np.int8).reshape(1, 3, 160, 160)
     board = np.frombuffer(data[INPUT_BYTES:INPUT_BYTES+3], dtype=np.int8).copy()
     elapsed = int.from_bytes(data[INPUT_BYTES+3:INPUT_BYTES+7], 'little')
+    # 两端使用同一输入；按生成模型的量化参数还原到 ONNX 的浮点接口。
     model_input = (quant.astype(np.float32) - np.float32(-14)) * np.float32(0.01865844801068306)
     onnx_logits = session.run(None, {session.get_inputs()[0].name: model_input})[0].reshape(-1)
-    board_logits = (board.astype(np.float32) - np.float32(48)) * np.float32(0.012564831413328648)
+    board_logits = (board.astype(np.float32) - np.float32(28)) * np.float32(0.010541616939008236)
     labels = ('no_hand', 'palm', 'fist')
     args.output.mkdir(parents=True, exist_ok=False)
     (args.output / 'board_input_int8.bin').write_bytes(input_bytes)

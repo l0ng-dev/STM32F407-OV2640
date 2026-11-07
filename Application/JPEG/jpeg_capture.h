@@ -15,7 +15,7 @@
  * JPEG_Capture_Start()、JPEG_Capture_GetData()、JPEG_Capture_GetSize()。
  *
  * @note
- * 默认使用外部 SRAM 起始处的 64 KiB，不使用动态内存。
+ * 使用外部 SRAM 的两块 64 KiB 缓存，不使用动态内存。
  ******************************************************************************
  */
 
@@ -46,17 +46,14 @@ typedef enum
     JPEG_ERROR_EOI_NOT_FOUND = 0x0202U
 } JPEG_Error_t;
 
-void JPEG_Buffer_Init(void);
-void JPEG_Buffer_Reset(void);
-uint8_t *JPEG_Buffer_GetData(void);
-uint32_t JPEG_Buffer_GetCapacity(void);
-uint32_t JPEG_Buffer_GetSize(void);
-
 void JPEG_Capture_Init(void);
+/* 交替使用两块缓存；调用方须确保下一块缓存已发送完毕。 */
+/* 交替启动下一缓冲；调用方须确保该缓冲不再被发送使用。 */
 JPEG_Error_t JPEG_Capture_Start(void);
 void JPEG_Capture_Process(void);
 JPEG_CaptureState_t JPEG_Capture_GetState(void);
 JPEG_Error_t JPEG_Capture_GetError(void);
+/* DONE 时取得当前有效 JPEG；下次启动会切换当前缓冲及其元数据。 */
 const uint8_t *JPEG_Capture_GetData(void);
 uint32_t JPEG_Capture_GetSize(void);
 
